@@ -1,132 +1,138 @@
 import 'dotenv/config';
-import { Telegraf } from 'telegraf';
+import { Telegraf, Markup } from 'telegraf';
+import path from 'path';
 import { initMemory, queryMemory, saveSessionMemory } from './utils/memory.js';
 import { runArchitectAgent, runDeveloperAgent, runTechLeadAgent } from './utils/agents.js';
-import { applyCodeToFiles, executeAndTest, autoCommitGit } from './utils/actions.js';
+import { applyCodeToFiles, executeAndTest, autoCommitGit, listRepos, createNewRepo } from './utils/actions.js';
 
 // Chargement et conversion de l'ID autorisé
 const MY_TELEGRAM_ID = parseInt(process.env.MY_TELEGRAM_ID, 10);
 const bot = new Telegraf(process.env.BOT_TOKEN);
 
 const MAX_RETRIES = 2;
+const BASE_PROG_PATH = process.env.BASE_PROG_PATH || "C:\\Users\\Marc\\Documents\\1G1R\\_Programmation";
 const REPO_PATH = process.cwd();
 
-// --- SÉCURITÉ : Middleware de vérification d'identité ---
+// --- GESTION DES SESSIONS ---
+const sessions = {};
+function getSession(chatId) {
+    if (!sessions[chatId]) sessions[chatId] = { activeRepo: null, state: "idle" };
+    return sessions[chatId];
+}
+
+// --- SÉCURITÉ ---
 bot.use(async (ctx, next) => {
-    if (ctx.from && ctx.from.id !== MY_TELEGRAM_ID) {
-        console.warn(`[Index] Accès refusé pour l'utilisateur ${ctx.from.id}`);
-        // Ne rien dire pour rester silencieux face aux attaquants
-        return;
-    }
+    if (ctx.from && ctx.from.id !== MY_TELEGRAM_ID) return;
     return next();
 });
 
-// --- CODE PRINCIPAL : Commande /code ---
-bot.command('code', async (ctx) => {
-    // Récupérer la commande complète sans le /code
-    const prompt = ctx.message.text.split(' ').slice(1).join(' ').trim();
-    if (!prompt) {
-        return ctx.reply("Veuillez fournir une description de votre requête. Ex: /code Modifie le header en rouge.");
+// --- UI REPO SELECTION ---
+async function showRepoSelection(ctx, page = 0) {
+    const repos = await listRepos(BASE_PROG_PATH);
+    const pageSize = 6;
+    const start = page * pageSize;
+    const currentRepos = repos.slice(start, start + pageSize);
+
+    const buttons = currentRepos.map(repo => [Markup.button.callback(`📁 ${repo}`, `select_repo:${repo}`)]);
+    const navButtons = [];
+    if (page > 0) navButtons.push(Markup.button.callback("⬅️", `page:${page - 1}`));
+    navButtons.push(Markup.button.callback("➕ Nouveau", "new_repo"));
+    if (start + pageSize < repos.length) navButtons.push(Markup.button.callback("➡️", `page:${page + 1}`));
+    buttons.push(navButtons);
+
+    const text = "💎 **VibeCoder Orchestrator**\nChoisissez un projet :";
+    const keyboard = Markup.inlineKeyboard(buttons);
+    return ctx.callbackQuery ? ctx.editMessageText(text, { parse_mode: 'Markdown', ...keyboard }) : ctx.reply(text, { parse_mode: 'Markdown', ...keyboard });
+}
+
+bot.command('code', ctx => {
+    getSession(ctx.chat.id).state = "idle";
+    return showRepoSelection(ctx, 0);
+});
+
+bot.action(/page:(.+)/, ctx => showRepoSelection(ctx, parseInt(ctx.match[1])));
+bot.action("new_repo", ctx => {
+    getSession(ctx.chat.id).state = "awaiting_repo_name";
+    return ctx.editMessageText("📝 Nom du nouveau projet :");
+});
+
+bot.action(/select_repo:(.+)/, async (ctx) => {
+    const repoName = ctx.match[1];
+    const session = getSession(ctx.chat.id);
+    session.activeRepo = repoName;
+    session.state = "idle";
+    return ctx.editMessageText(`✅ Projet **${repoName}** actif. Instructions ?`, { parse_mode: 'Markdown' });
+});
+
+// --- PIPELINE HANDLER ---
+bot.on('text', async (ctx) => {
+    const session = getSession(ctx.chat.id);
+    const text = ctx.message.text.trim();
+
+    if (session.state === "awaiting_repo_name") {
+        const res = await createNewRepo(BASE_PROG_PATH, text);
+        if (res.success) {
+            session.activeRepo = text;
+            session.state = "idle";
+            return ctx.reply(`🚀 Projet **${text}** prêt.`);
+        }
+        return ctx.reply(`❌ Erreur: ${res.error}`);
     }
 
-    // Status message initial
-    const statusMsg = await ctx.reply("⏳ Démarrage de la séquence VibeCoder... Recherche en mémoire locale (QMD).");
+    if (!session.activeRepo) return ctx.reply("⚠️ Tapez /code pour choisir un projet.");
 
-    const sendEdit = async (message) => {
-        try {
-            await ctx.telegram.editMessageText(ctx.chat.id, statusMsg.message_id, null, message);
-        } catch (e) {
-            console.error('Erreur édition Telegram:', e.message);
-        }
+    const prompt = text;
+    const targetPath = path.join(BASE_PROG_PATH, session.activeRepo);
+    const statusMsg = await ctx.reply(`⏳ [${session.activeRepo}] Analyse...`);
+
+    const sendEdit = async (m) => {
+        try { await ctx.telegram.editMessageText(ctx.chat.id, statusMsg.message_id, null, m); } catch (e) { }
     };
 
     try {
-        // 1. Recherche en mémoire locale
         const memoryContext = await queryMemory(prompt);
+        let attempt = 1, success = false, finalCode = "", errorMessage = null;
 
-        // 2. Génération du plan par l'Architecte
-        await sendEdit("🏗️ L'Architecte analyse et conçoit un plan d'action...");
-        const plan = await runArchitectAgent(prompt, memoryContext);
+        while (attempt <= MAX_RETRIES + 1) {
+            await sendEdit(`🧠 (Essai ${attempt}/${MAX_RETRIES + 1}) Réflexion...`);
+            const plan = await runArchitectAgent(prompt, memoryContext);
+            const devCode = await runDeveloperAgent(plan, memoryContext, errorMessage);
+            finalCode = await runTechLeadAgent(devCode);
 
-        let errorMessage = null;
-        let success = false;
-        let finalCode = "";
-
-        // Boucle d'auto-correction (Self-Healing)
-        for (let attempt = 1; attempt <= MAX_RETRIES + 1; attempt++) {
-            await sendEdit(`💻 (Essai ${attempt}/${MAX_RETRIES + 1}) Le Développeur génère le code...`);
-
-            // 3. Le Développeur implémente
-            const developerCode = await runDeveloperAgent(plan, memoryContext, errorMessage);
-
-            // 4. Le Tech Lead vérifie et formate correctement pour la machine
-            await sendEdit(`🔎 (Essai ${attempt}/${MAX_RETRIES + 1}) Le Tech Lead formate et vérifie la proposition...`);
-            finalCode = await runTechLeadAgent(developerCode);
-
-            // 5. Actions physiques : écriture et exécution
-            await sendEdit(`💾 (Essai ${attempt}/${MAX_RETRIES + 1}) Application des modifications sur le disque...`);
-            const writtenFiles = await applyCodeToFiles(finalCode, REPO_PATH);
-
-            if (writtenFiles.length === 0) {
-                // Aucun fichier généré, peut-être une erreur de formatage ?
-                errorMessage = "Le Tech Lead n'a généré aucun fichier valide respectant le format `### FILE:`. Reformate ta réponse.";
-                continue;
+            await sendEdit(`💾 (Essai ${attempt}/${MAX_RETRIES + 1}) Écriture...`);
+            const files = await applyCodeToFiles(finalCode, targetPath);
+            if (files.length === 0) {
+                errorMessage = "Format non respecté (### FILE:).";
+                attempt++; continue;
             }
 
-            await sendEdit(`⚡ (Essai ${attempt}/${MAX_RETRIES + 1}) Exécution des tests...`);
-            const testResult = await executeAndTest(finalCode, REPO_PATH);
-
-            if (testResult.success) {
-                success = true;
-                await sendEdit(`✅ (Essai ${attempt}/${MAX_RETRIES + 1}) L'exécution a réussi sans erreur.`);
-                break; // Sort de la boucle
-            } else {
-                errorMessage = testResult.error;
-                await sendEdit(`⚠️ (Essai ${attempt}/${MAX_RETRIES + 1}) Échec de l'exécution. Rapport de bug transmis pour auto-correction.`);
-                // On boucle à l'essai suivant
-            }
+            await sendEdit(`⚡ (Essai ${attempt}/${MAX_RETRIES + 1}) Tests...`);
+            const test = await executeAndTest(finalCode, targetPath);
+            if (test.success) { success = true; break; }
+            errorMessage = test.error; attempt++;
         }
 
         if (success) {
-            // 6. Succès : Commit et sauvegarde
-            await sendEdit("🔄 Validation des changements avec un commit Git...");
-            await autoCommitGit(REPO_PATH, "Auto-résolution pour: " + prompt.slice(0, 30));
-
-            // Sauvegarder la mémoire
-            await saveSessionMemory("VibeCode", `**Requête:** ${prompt}\n\n**Résultat final généré :**\n${finalCode}`, {
-                prompt: prompt,
-                success: true
-            });
-
-            await sendEdit("🎉 Séquence complétée avec succès ! Les fichiers ont été écrits et commités.");
+            await sendEdit(`🔄 Commit Git dans ${session.activeRepo}...`);
+            await autoCommitGit(targetPath, "VibeCode: " + prompt.slice(0, 30));
+            await saveSessionMemory(session.activeRepo, `Req: ${prompt}\nRes: ${finalCode}`, { path: targetPath, success: true });
+            await ctx.reply(`🎯 **Succès !**\n\n\`\`\`\n${finalCode.slice(0, 1000)}\n\`\`\``, { parse_mode: 'Markdown' });
         } else {
-            // Échec global après les retries
-            await sendEdit("❌ Échec de la séquence après plusieurs essais. Revoyez votre prompt, l'agent n'a pas réussi à réparer l'erreur:\n\n`" + errorMessage.substring(0, 2000) + "`");
-
-            // Sauvegarder l'échec dans la mémoire pour apprentissage futur
-            await saveSessionMemory("Echec-VibeCode", `**Requête:** ${prompt}\n\n**Dernière Erreur:** ${errorMessage}`, {
-                prompt: prompt,
-                success: false
-            });
+            await ctx.reply(`❌ Échec après ${MAX_RETRIES + 1} essais.\n\nErreur: ${errorMessage}`);
         }
-
-    } catch (globalError) {
-        console.error("Erreur globale d'orchestration:", globalError);
-        await sendEdit(`❌ Une erreur critique est survenue dans l'orchestrateur : ${globalError.message}`);
+    } catch (e) {
+        console.error(e);
+        await ctx.reply("💥 Erreur orchestrateur.");
     }
 });
 
-// Initialisation globale
+// --- INIT ---
 try {
-    console.log("[Système] Démarrage de VibeCoder Orchestrator v2.1...");
+    console.log("[Système] VibeCoder Orchestrator v2.1...");
     await initMemory();
     bot.launch();
-    console.log("[Telegram] Bot connecté et en attente des commandes.");
+    console.log("[Telegram] Connecté.");
+} catch (e) { console.error(e); }
 
-    // Arrêt propre
-    process.once('SIGINT', () => bot.stop('SIGINT'));
-    process.once('SIGTERM', () => bot.stop('SIGTERM'));
-
-} catch (e) {
-    console.error("Erreur fatale au lancement:", e);
-}
+process.once('SIGINT', () => bot.stop('SIGINT'));
+process.once('SIGTERM', () => bot.stop('SIGTERM'));

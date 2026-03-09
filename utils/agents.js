@@ -1,5 +1,30 @@
 import { execa } from 'execa';
 
+/**
+ * CONFIGURATION DES PRIORITÉS PAR RÔLE
+ * Chaque rôle essaie les commandes dans l'ordre de la liste.
+ */
+const CONFIG = {
+    // Architecte : Claude Code (Opus) > Gemini Pro > Codex
+    architect: [
+        { cmd: 'claude', args: ['--model', 'opus', '--prompt'] },
+        { cmd: 'gemini', args: ['--prompt'] },
+        { cmd: 'codex', args: ['run'] }
+    ],
+    // Développeur : Codex > Claude Sonnet > Gemini Flash
+    developer: [
+        { cmd: 'codex', args: ['run'] },
+        { cmd: 'claude', args: ['--model', 'sonnet', '--prompt'] },
+        { cmd: 'gemini', args: ['--prompt'] }
+    ],
+    // Tech Lead : Claude Sonnet > Gemini Pro > Codex
+    techlead: [
+        { cmd: 'claude', args: ['--model', 'sonnet', '--prompt'] },
+        { cmd: 'gemini', args: ['--prompt'] },
+        { cmd: 'codex', args: ['run'] }
+    ]
+};
+
 // Appel à l'Agent Architecte (Planification)
 export async function runArchitectAgent(prompt, context) {
     const fullPrompt = `Tu es un Architecte Logiciel.
@@ -12,7 +37,7 @@ ${context}
 DEMANDE UTILISATEUR :
 ${prompt}`;
 
-    return await executeLimiter(fullPrompt, 'gemini-cli', 'codex-cli');
+    return await executeLimiter(fullPrompt, CONFIG.architect);
 }
 
 // Appel à l'Agent Développeur (Génération de code)
@@ -35,7 +60,7 @@ Corrige ton code en conséquence.
 `;
     }
 
-    return await executeLimiter(fullPrompt, 'gemini-cli', 'codex-cli');
+    return await executeLimiter(fullPrompt, CONFIG.developer);
 }
 
 // Appel à l'Agent Tech Lead (Formatage final et consignes strictes)
@@ -56,24 +81,29 @@ CONSIGNES STRICTES DE FORMATAGE (OBLIGATOIRE) :
 CODE DU DÉVELOPPEUR À FORMATER :
 ${developerCode}`;
 
-    return await executeLimiter(fullPrompt, 'gemini-cli', 'codex-cli');
+    return await executeLimiter(fullPrompt, CONFIG.techlead);
 }
 
-// Fonction utilitaire pour exécuter l'appel CLI avec fallback
-async function executeLimiter(prompt, primaryCli, fallbackCli) {
-    try {
-        console.log(`[Agent] Exécution via ${primaryCli}...`);
-        // On passe les arguments sous forme de tableau pour execa
-        const { stdout } = await execa(primaryCli, ['--prompt', prompt]);
-        return stdout;
-    } catch (error) {
-        console.warn(`[Agent] Échec de ${primaryCli}: ${error.message}. Tentative de fallback sur ${fallbackCli}...`);
+/**
+ * Fonction utilitaire pour exécuter l'appel CLI avec une liste de priorités (fallback)
+ */
+async function executeLimiter(prompt, configList) {
+    let lastError = null;
+
+    for (const agentConfig of configList) {
         try {
-            const { stdout } = await execa(fallbackCli, ['run', prompt]);
+            console.log(`[Agent] Tentative avec ${agentConfig.cmd}...`);
+            // On concatène les arguments de config avec le prompt
+            const fullArgs = [...agentConfig.args, prompt];
+            const { stdout } = await execa(agentConfig.cmd, fullArgs);
             return stdout;
-        } catch (fallbackError) {
-            console.error(`[Agent] Échec critique du fallback ${fallbackCli}:`, fallbackError);
-            throw new Error(`Échec de génération. Primary et Fallback ont tous les deux planté.`);
+        } catch (error) {
+            console.warn(`[Agent] Échec de ${agentConfig.cmd}: ${error.message}`);
+            lastError = error;
+            // On continue vers l'agent suivant dans la liste
         }
     }
+
+    console.error(`[Agent] Échec critique : tous les agents de la pipeline ont échoué.`);
+    throw new Error(`Échec de génération global. Dernier message: ${lastError?.message || 'Inconnu'}`);
 }
