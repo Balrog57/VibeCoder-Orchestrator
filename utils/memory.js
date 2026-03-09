@@ -16,7 +16,7 @@ export async function initMemory() {
 // Interroger la mémoire locale via qmd
 export async function queryMemory(prompt) {
     try {
-        const { stdout } = await execa('qmd', [prompt], { cwd: memoryPath });
+        const { stdout } = await execa('qmd', ['query', prompt], { cwd: memoryPath });
         return stdout;
     } catch (err) {
         console.warn('Requête mémoire échouée ou qmd introuvable. Mémoire vide retournée.', err.message);
@@ -38,7 +38,7 @@ export async function saveSessionMemory(sessionName, content, frontmatter = {}) 
 
     try {
         await fs.writeFile(filePath, fmString + content, 'utf8');
-    } catch(err) {
+    } catch (err) {
         console.error('Erreur de sauvegarde de la session:', err);
     }
 }
