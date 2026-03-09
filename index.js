@@ -7,7 +7,7 @@ import { applyCodeToFiles, executeAndTest, autoCommitGit, listRepos, createNewRe
 
 // Chargement et conversion de l'ID autorisé
 const MY_TELEGRAM_ID = parseInt(process.env.MY_TELEGRAM_ID, 10);
-const bot = new Telegraf(process.env.BOT_TOKEN);
+const bot = new Telegraf(process.env.BOT_TOKEN, { handlerTimeout: Infinity });
 
 const MAX_RETRIES = 2;
 const BASE_PROG_PATH = process.env.BASE_PROG_PATH || "C:\\Users\\Marc\\Documents\\1G1R\\_Programmation";
