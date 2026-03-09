@@ -93,14 +93,20 @@ async function executeLimiter(prompt, configList) {
     for (const agentConfig of configList) {
         try {
             console.log(`[Agent] Tentative avec ${agentConfig.cmd}...`);
-            // On concatène les arguments de config avec le prompt
             const fullArgs = [...agentConfig.args, prompt];
-            const { stdout } = await execa(agentConfig.cmd, fullArgs);
-            return stdout;
+
+            let result;
+            if (agentConfig.cmd === 'gemini') {
+                // On pipe "3" pour répondre "No, don't ask again" à la question interactive d'Antigravity
+                result = await execa({ shell: true })`${agentConfig.cmd} ${fullArgs.map(a => `"${a}"`).join(' ')} << "3"`;
+            } else {
+                result = await execa(agentConfig.cmd, fullArgs);
+            }
+
+            return result.stdout;
         } catch (error) {
             console.warn(`[Agent] Échec de ${agentConfig.cmd}: ${error.message}`);
             lastError = error;
-            // On continue vers l'agent suivant dans la liste
         }
     }
 
