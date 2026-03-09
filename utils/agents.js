@@ -118,9 +118,9 @@ async function executeLimiter(prompt, configList) {
             let result;
             if (agentConfig.cmd === 'gemini' || agentConfig.cmd === 'qwen') {
                 // On passe "3\n" dans stdin pour répondre à l'éventuelle question d'Antigravity
-                result = await execa(agentConfig.cmd, fullArgs, { input: "3\n" });
+                result = await execa(agentConfig.cmd, fullArgs, { input: "3\n", timeout: 80000 });
             } else {
-                result = await execa(agentConfig.cmd, fullArgs);
+                result = await execa(agentConfig.cmd, fullArgs, { stdin: 'ignore', timeout: 80000 });
             }
 
             return result.stdout;
