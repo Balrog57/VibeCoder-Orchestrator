@@ -4,3 +4,12 @@
 tasks/
 node_modules/
 .DS_Store
+MEMORY/
+memory/
+*.sqlite*
+*.log
+install/
+cache/
+bun.lockb
+
+

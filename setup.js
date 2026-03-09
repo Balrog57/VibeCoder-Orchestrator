@@ -36,10 +36,48 @@ async function setup() {
         console.log("\n📦 Installation des dépendances Node.js...");
         await execa('npm', ['install'], { stdio: 'inherit' });
 
-        // 5. Initialisation de la mémoire
+        // 4.5. Vérification et Installation de Bun (requis pour QMD sur Windows/FTS5)
+        console.log("\n⚡ Vérification de Bun...");
+        try {
+            await execa('bun', ['--version']);
+            console.log("✅ Bun est déjà installé.");
+        } catch (e) {
+            console.log("⚠️ Bun n'est pas détecté. Tentative d'installation automatique...");
+            try {
+                // Commande officielle d'installation Bun pour Windows via PowerShell
+                await execa('powershell', ['-Command', 'irm bun.sh/install.ps1 | iex'], { stdio: 'inherit' });
+                console.log("✅ Bun a été installé. Note : Vous devrez peut-être redémarrer votre terminal pour que 'bun' soit reconnu.");
+
+                // On essaie de rafraîchir le PATH pour la session actuelle si possible (approximatif)
+                const bunPath = path.join(process.env.USERPROFILE, '.bun', 'bin');
+                process.env.PATH = `${bunPath};${process.env.PATH}`;
+            } catch (installErr) {
+                console.error("❌ Échec de l'installation automatique de Bun.");
+                console.log("👉 Veuillez installer Bun manuellement : https://bun.sh/docs/installation");
+                throw new Error("Bun est requis pour le bon fonctionnement de QMD sur Windows.");
+            }
+        }
+
+        // 4.6. Installation de QMD
+        console.log("\n🔍 Installation de QMD (Moteur de recherche sémantique)...");
+        try {
+            await execa('bun', ['install', '-g', 'https://github.com/tobi/qmd'], { stdio: 'inherit' });
+        } catch (e) {
+            // Si bun install -g échoue (peut-être path non mis à jour), on tente avec le chemin absolu s'il vient d'être installé
+            const bunBin = path.join(process.env.USERPROFILE, '.bun', 'bin', 'bun');
+            try {
+                await execa(bunBin, ['install', '-g', 'https://github.com/tobi/qmd'], { stdio: 'inherit' });
+            } catch (e2) {
+                console.log("⚠️ Impossible d'installer QMD via Bun.");
+                console.log("👉 Tentative manuelle recommandée : bun install -g https://github.com/tobi/qmd");
+            }
+        }
+
+        // 5. Initialisation de la mémoire globale
         console.log("\n🧠 Initialisation de la mémoire locale (QMD)...");
-        if (!await fs.stat('memory').catch(() => false)) {
-            await fs.mkdir('memory', { recursive: true });
+        const memoryDir = path.join(baseProgPath.trim(), 'MEMORY');
+        if (!await fs.stat(memoryDir).catch(() => false)) {
+            await fs.mkdir(memoryDir, { recursive: true });
         }
 
         // 6. Création du raccourci de démarrage (Auto-Start Windows)

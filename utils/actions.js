@@ -11,7 +11,7 @@ import { execa } from 'execa';
  * ```
  */
 export async function applyCodeToFiles(llmOutput, repoPath) {
-    const fileRegex = /### FILE:\s*([^\r\n]+)\r?\n```[a-z]*\r?\n([\s\S]*?)```/g;
+    const fileRegex = /### FILE:\s*([^\r\n]+)\r?\n```[^\r\n]*\r?\n([\s\S]*?)```/g;
     let match;
     let filesWritten = [];
 
