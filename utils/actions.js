@@ -1,0 +1,96 @@
+import fs from 'fs/promises';
+import path from 'path';
+import { execa } from 'execa';
+
+/**
+ * Parcourt le texte généré par l'IA et extrait les blocs de code pour les écrire sur le disque.
+ * Format attendu :
+ * ### FILE: chemin/du/fichier.js
+ * ```js
+ * code
+ * ```
+ */
+export async function applyCodeToFiles(llmOutput, repoPath) {
+    const fileRegex = /### FILE:\s*([^\r\n]+)\r?\n```[a-z]*\r?\n([\s\S]*?)```/g;
+    let match;
+    let filesWritten = [];
+
+    while ((match = fileRegex.exec(llmOutput)) !== null) {
+        const relativeFilePath = match[1].trim();
+        const codeContent = match[2];
+        const absolutePath = path.join(repoPath, relativeFilePath);
+        const dir = path.dirname(absolutePath);
+
+        try {
+            // S'assurer que le dossier parent existe
+            await fs.mkdir(dir, { recursive: true });
+
+            // Écrire le contenu dans le fichier
+            await fs.writeFile(absolutePath, codeContent, 'utf-8');
+            filesWritten.push(relativeFilePath);
+            console.log(`[Actions] Fichier écrit : ${absolutePath}`);
+        } catch (err) {
+            console.error(`[Actions] Erreur d'écriture pour le fichier ${absolutePath}:`, err);
+            throw new Error(`Erreur d'écriture sur ${relativeFilePath}: ${err.message}`);
+        }
+    }
+
+    return filesWritten;
+}
+
+/**
+ * Extrait la commande de test "### RUN: commande" et l'exécute avec timeout
+ */
+export async function executeAndTest(llmOutput, repoPath) {
+    const runRegex = /### RUN:\s*([^\r\n]+)/;
+    const match = runRegex.exec(llmOutput);
+
+    if (!match) {
+        console.log('[Actions] Aucune commande ### RUN: trouvée.');
+        return { success: true, message: 'Aucun test spécifié.' };
+    }
+
+    const commandToRun = match[1].trim();
+    console.log(`[Actions] Exécution de la commande de test : ${commandToRun}`);
+
+    try {
+        // Exécuter la commande dans le répertoire repoPath, avec un timeout de 15 secondes
+        // On split la commande et ses arguments de manière sécurisée (simplifiée ici)
+        const args = commandToRun.split(' ');
+        const cmd = args.shift();
+
+        const { stdout, stderr } = await execa(cmd, args, {
+            cwd: repoPath,
+            timeout: 15000,
+            shell: true // Toléré ici pour certains scripts, mais attention aux injections si variables non contrôlées
+        });
+
+        return { success: true, message: `Test réussi:\n${stdout}` };
+    } catch (err) {
+        console.error(`[Actions] Erreur lors de l'exécution de: ${commandToRun}`);
+        return { success: false, error: err.stderr || err.message };
+    }
+}
+
+/**
+ * Effectue un commit Git si les modifications sont approuvées
+ */
+export async function autoCommitGit(repoPath, message) {
+    console.log(`[Actions] Création d'un commit Git...`);
+    try {
+        // Ajout de tous les fichiers modifiés/créés
+        await execa('git', ['add', '.'], { cwd: repoPath });
+
+        // Commit automatique
+        await execa('git', ['commit', '-m', `VibeCoder: ${message}`], { cwd: repoPath });
+        console.log(`[Actions] Commit Git effectué avec succès.`);
+        return true;
+    } catch (err) {
+        if (err.stdout && err.stdout.includes('nothing to commit')) {
+            console.log(`[Actions] Rien à commiter.`);
+            return true;
+        }
+        console.error(`[Actions] Erreur de commit Git:`, err.message);
+        throw new Error(`Échec du commit Git: ${err.message}`);
+    }
+}
