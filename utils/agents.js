@@ -5,23 +5,29 @@ import { execa } from 'execa';
  * Chaque rôle essaie les commandes dans l'ordre de la liste.
  */
 const CONFIG = {
-    // Architecte : Claude Code (Opus) > Gemini Pro > Codex
+    // Architecte : Claude Code (Opus) > Gemini Pro > Qwen > OpenCode > Codex
     architect: [
-        { cmd: 'claude', args: ['--model', 'opus', '--prompt'] },
-        { cmd: 'gemini', args: ['--prompt', '--yolo'] },
-        { cmd: 'codex', args: ['run'] }
+        { cmd: 'claude', args: ['--model', 'opus', '-p'] },
+        { cmd: 'gemini', args: ['--yolo', '-p'] },
+        { cmd: 'qwen', args: ['--yolo'] },
+        { cmd: 'opencode', args: ['run'] },
+        { cmd: 'codex', args: ['exec'] }
     ],
-    // Développeur : Codex > Claude Sonnet > Gemini Flash
+    // Développeur : Codex > Claude Sonnet > Gemini Flash > Qwen > OpenCode
     developer: [
-        { cmd: 'codex', args: ['run'] },
-        { cmd: 'claude', args: ['--model', 'sonnet', '--prompt'] },
-        { cmd: 'gemini', args: ['--prompt', '--yolo'] }
+        { cmd: 'codex', args: ['exec'] },
+        { cmd: 'claude', args: ['--model', 'sonnet', '-p'] },
+        { cmd: 'gemini', args: ['--yolo', '-p'] },
+        { cmd: 'qwen', args: ['--yolo'] },
+        { cmd: 'opencode', args: ['run'] }
     ],
-    // Tech Lead : Claude Sonnet > Gemini Pro > Codex
+    // Tech Lead : Claude Sonnet > Gemini Pro > Qwen > OpenCode > Codex
     techlead: [
-        { cmd: 'claude', args: ['--model', 'sonnet', '--prompt'] },
-        { cmd: 'gemini', args: ['--prompt', '--yolo'] },
-        { cmd: 'codex', args: ['run'] }
+        { cmd: 'claude', args: ['--model', 'sonnet', '-p'] },
+        { cmd: 'gemini', args: ['--yolo', '-p'] },
+        { cmd: 'qwen', args: ['--yolo'] },
+        { cmd: 'opencode', args: ['run'] },
+        { cmd: 'codex', args: ['exec'] }
     ]
 };
 
@@ -110,9 +116,9 @@ async function executeLimiter(prompt, configList) {
             const fullArgs = [...agentConfig.args, prompt];
 
             let result;
-            if (agentConfig.cmd === 'gemini') {
-                // On pipe "3" pour répondre "No, don't ask again" à la question interactive d'Antigravity
-                result = await execa({ shell: true })`${agentConfig.cmd} ${fullArgs.map(a => `"${a}"`).join(' ')} << "3"`;
+            if (agentConfig.cmd === 'gemini' || agentConfig.cmd === 'qwen') {
+                // On passe "3\n" dans stdin pour répondre à l'éventuelle question d'Antigravity
+                result = await execa(agentConfig.cmd, fullArgs, { input: "3\n" });
             } else {
                 result = await execa(agentConfig.cmd, fullArgs);
             }
