@@ -28,7 +28,10 @@ bot.use(async (ctx, next) => {
 
 // --- UI REPO SELECTION ---
 async function showRepoSelection(ctx, page = 0) {
+    console.log(`[UI] Affichage de la sélection de projets (Page ${page})...`);
     const repos = await listRepos(BASE_PROG_PATH);
+    console.log(`[UI] ${repos.length} projets trouvés dans ${BASE_PROG_PATH}.`);
+
     const pageSize = 6;
     const start = page * pageSize;
     const currentRepos = repos.slice(start, start + pageSize);
@@ -46,6 +49,7 @@ async function showRepoSelection(ctx, page = 0) {
 }
 
 bot.command('code', ctx => {
+    console.log(`[Command] /code reçu de ${ctx.chat.id}`);
     getSession(ctx.chat.id).state = "idle";
     return showRepoSelection(ctx, 0);
 });

@@ -94,3 +94,34 @@ export async function autoCommitGit(repoPath, message) {
         throw new Error(`Échec du commit Git: ${err.message}`);
     }
 }
+
+/**
+ * Liste les répertoires disponibles dans le chemin de base
+ */
+export async function listRepos(basePath) {
+    try {
+        const entries = await fs.readdir(basePath, { withFileTypes: true });
+        return entries
+            .filter(dirent => dirent.isDirectory() && !dirent.name.startsWith('.'))
+            .map(dirent => dirent.name);
+    } catch (error) {
+        console.error("Erreur lors du listage des repos:", error);
+        return [];
+    }
+}
+
+/**
+ * Crée un nouveau répertoire de projet avec un .gitignore de base
+ */
+export async function createNewRepo(basePath, name) {
+    const targetPath = path.join(basePath, name);
+    try {
+        await fs.mkdir(targetPath, { recursive: true });
+        // Initialiser un gitignore par défaut
+        const gitignoreContent = "node_modules/\n.env\n.DS_Store\n";
+        await fs.writeFile(path.join(targetPath, ".gitignore"), gitignoreContent);
+        return { success: true, path: targetPath };
+    } catch (error) {
+        return { success: false, error: error.message };
+    }
+}

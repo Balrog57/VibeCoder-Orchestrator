@@ -42,6 +42,24 @@ async function setup() {
             await fs.mkdir('memory', { recursive: true });
         }
 
+        // 6. Création du raccourci de démarrage (Auto-Start Windows)
+        console.log("\n⚙️ Configuration du démarrage automatique Windows...");
+        const startupFolder = path.join(process.env.APPDATA, 'Microsoft', 'Windows', 'Start Menu', 'Programs', 'Startup');
+        const batPath = path.join(process.cwd(), 'start.bat');
+        const shortcutScript = `
+        Set oWS = WScript.CreateObject("WScript.Shell")
+        sLinkFile = "${path.join(startupFolder, 'VibeCoder_Orchestrator.lnk')}"
+        Set oLink = oWS.CreateShortcut(sLinkFile)
+        oLink.TargetPath = "${batPath}"
+        oLink.WorkingDirectory = "${process.cwd()}"
+        oLink.Description = "Lancement automatique de VibeCoder Orchestrator"
+        oLink.Save
+        `;
+        const vbsPath = path.join(process.cwd(), 'create_shortcut.vbs');
+        await fs.writeFile(vbsPath, shortcutScript, 'utf8');
+        await execa('cscript', [vbsPath], { stdio: 'ignore' });
+        await fs.unlink(vbsPath); // Nettoyage
+
         console.log("\n✅ INSTALLATION TERMINÉE AVEC SUCCÈS !");
         console.log(`🚀 Lancez le bot avec : node index.js`);
 
