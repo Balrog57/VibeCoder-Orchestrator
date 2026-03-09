@@ -5,29 +5,29 @@ import { execa } from 'execa';
  * Chaque rôle essaie les commandes dans l'ordre de la liste.
  */
 const CONFIG = {
-    // Architecte : Claude Code (Opus) > Gemini Pro > Qwen > OpenCode > Codex
+    // Architecte
     architect: [
+        { cmd: 'qwen', args: ['--yolo', '-p'] },
+        { cmd: 'gemini', args: ['--yolo', '-p'] },
         { cmd: 'claude', args: ['--model', 'opus', '-p'] },
-        { cmd: 'gemini', args: ['--yolo', '-p'] },
-        { cmd: 'qwen', args: ['--yolo'] },
         { cmd: 'opencode', args: ['run'] },
         { cmd: 'codex', args: ['exec'] }
     ],
-    // Développeur : Codex > Claude Sonnet > Gemini Flash > Qwen > OpenCode
+    // Développeur (Codeur)
     developer: [
-        { cmd: 'codex', args: ['exec'] },
-        { cmd: 'claude', args: ['--model', 'sonnet', '-p'] },
+        { cmd: 'qwen', args: ['--yolo', '-p'] },
         { cmd: 'gemini', args: ['--yolo', '-p'] },
-        { cmd: 'qwen', args: ['--yolo'] },
-        { cmd: 'opencode', args: ['run'] }
-    ],
-    // Tech Lead : Claude Sonnet > Gemini Pro > Qwen > OpenCode > Codex
-    techlead: [
         { cmd: 'claude', args: ['--model', 'sonnet', '-p'] },
-        { cmd: 'gemini', args: ['--yolo', '-p'] },
-        { cmd: 'qwen', args: ['--yolo'] },
         { cmd: 'opencode', args: ['run'] },
         { cmd: 'codex', args: ['exec'] }
+    ],
+    // Tech Lead
+    techlead: [
+        { cmd: 'qwen', args: ['--yolo', '-p'] },
+        { cmd: 'gemini', args: ['--yolo', '-p'] },
+        { cmd: 'claude', args: ['--model', 'sonnet', '-p'] },
+        { cmd: 'codex', args: ['exec'] },
+        { cmd: 'opencode', args: ['run'] }
     ]
 };
 
@@ -115,13 +115,8 @@ async function executeLimiter(prompt, configList) {
             console.log(`[Agent] Tentative avec ${agentConfig.cmd}...`);
             const fullArgs = [...agentConfig.args, prompt];
 
-            let result;
-            if (agentConfig.cmd === 'gemini' || agentConfig.cmd === 'qwen') {
-                // On passe "3\n" dans stdin pour répondre à l'éventuelle question d'Antigravity
-                result = await execa(agentConfig.cmd, fullArgs, { input: "3\n", timeout: 80000 });
-            } else {
-                result = await execa(agentConfig.cmd, fullArgs, { stdin: 'ignore', timeout: 80000 });
-            }
+            // Exécution sécurisée et totalement non-interactive (headless)
+            const result = await execa(agentConfig.cmd, fullArgs, { stdin: 'ignore', timeout: 80000 });
 
             return result.stdout;
         } catch (error) {
