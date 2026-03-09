@@ -1,10 +1,10 @@
 import 'dotenv/config';
 import { Telegraf, Markup } from 'telegraf';
 import path from 'path';
-import { 
-    initMemory, 
-    queryMemory, 
-    saveSessionSummary, 
+import {
+    initMemory,
+    queryMemory,
+    saveSessionSummary,
     appendToDailyLog,
     generateSummary,
     loadSessionHistory,
@@ -40,7 +40,8 @@ function getSession(chatId) {
             lastFiles: [],
             lastTestResult: null,
             saveNotes: '',
-            isProcessing: false  // Protection contre les exécutions multiples
+            isProcessing: false,  // Protection contre les exécutions multiples
+            disabledClis: []      // Liste des CLI désactivés pour cette session
         };
     }
     return sessions[chatId];
@@ -54,7 +55,7 @@ async function initAvailableClis() {
         AVAILABLE_CLIS = clis.map(c => c.name);
         AVAILABLE_MODELS = Object.fromEntries(clis.map(c => [c.name, c.models]));
         FALLBACK_ORDER = clis.map(c => c.name); // Déjà trié par priorité
-        
+
         console.log('[CLI] Disponibles:', AVAILABLE_CLIS.join(', '));
         console.log('[CLI] Fallback order:', FALLBACK_ORDER.join(' > '));
     } catch (err) {
@@ -123,105 +124,150 @@ bot.action(/select_repo:(.+)/, async (ctx) => {
 // --- COMMANDE /cli ---
 bot.command('cli', async (ctx) => {
     const session = getSession(ctx.chat.id);
-    const args = ctx.message.text.split(' ').slice(1).join(' ').trim();
-    
+    const argsArr = ctx.message.text.split(' ').slice(1);
+    const args = argsArr.join(' ').trim();
+
     if (!args) {
-        // Afficher le CLI actuel et les options avec boutons
-        const currentCli = session.defaultCli || "⚡ Auto (fallback chain)";
-        
-        // Créer les boutons pour les CLI disponibles
-        const buttons = AVAILABLE_CLIS.map(cli => 
-            [Markup.button.callback(`${session.defaultCli === cli ? '✅' : '🔧'} ${cli}`, `set_cli:${cli}`)]
-        );
-        buttons.push([Markup.button.callback("🔄 Auto (fallback)", "set_cli:auto")]);
-        buttons.push([Markup.button.callback("🔁 Refresh", "refresh_clis")]);
-        
-        return ctx.reply(
-            `🛠 **Configuration CLI**\n\n` +
-            `Actuel: **${currentCli}**\n\n` +
-            `CLI installés: ${AVAILABLE_CLIS.length}\n` +
-            `Choisissez un CLI par défaut :`,
-            { parse_mode: 'Markdown', ...Markup.inlineKeyboard(buttons) }
-        );
+        return renderCliSettings(ctx, session);
     }
-    
-    // Si argument fourni directement
+
     const cliName = args.toLowerCase();
     if (cliName === 'auto') {
         session.defaultCli = null;
         return ctx.reply("✅ CLI réinitialisé à **Auto (fallback chain)**", { parse_mode: 'Markdown' });
     }
-    
+
     if (AVAILABLE_CLIS.includes(cliName)) {
         session.defaultCli = cliName;
+        // S'assurer qu'il n'est pas dans disabledClis s'il est choisi par défaut
+        session.disabledClis = session.disabledClis.filter(c => c !== cliName);
         return ctx.reply(`✅ CLI par défaut défini sur **${cliName}**`, { parse_mode: 'Markdown' });
     }
-    
+
     return ctx.reply(`❌ CLI inconnu. Disponibles: ${AVAILABLE_CLIS.join(', ')}, auto`);
 });
 
-bot.action('set_cli:auto', (ctx) => {
-    const session = getSession(ctx.chat.id);
-    session.defaultCli = null;
-    return ctx.editMessageText("✅ CLI réinitialisé à **Auto (fallback chain)**", { parse_mode: 'Markdown' });
-});
-
-bot.action(/set_cli:(.+)/, (ctx) => {
+// Action pour basculer l'état d'un CLI [ON/OFF]
+bot.action(/toggle_cli:(.+)/, async (ctx) => {
     const session = getSession(ctx.chat.id);
     const cliName = ctx.match[1];
-    session.defaultCli = cliName;
-    return ctx.editMessageText(`✅ CLI par défaut défini sur **${cliName}**`, { parse_mode: 'Markdown' });
+
+    if (session.disabledClis.includes(cliName)) {
+        session.disabledClis = session.disabledClis.filter(c => c !== cliName);
+    } else {
+        session.disabledClis.push(cliName);
+        // Si c'était le CLI par défaut, on le reset
+        if (session.defaultCli === cliName) session.defaultCli = null;
+    }
+
+    // Rafraîchir l'affichage
+    return renderCliSettings(ctx, session);
+});
+
+async function renderCliSettings(ctx, session) {
+    const currentCli = session.defaultCli || "⚡ Auto (fallback)";
+
+    const buttons = AVAILABLE_CLIS.map(cli => {
+        const isDisabled = session.disabledClis.includes(cli);
+        const isDefault = session.defaultCli === cli;
+        const statusIcon = isDisabled ? '🔴' : '🟢';
+        const label = `${statusIcon} ${cli}${isDefault ? ' (Def)' : ''}`;
+        return [
+            Markup.button.callback(label, `toggle_cli:${cli}`),
+            Markup.button.callback(isDefault ? '⭐' : '🔸', `set_cli:${cli}`)
+        ];
+    });
+
+    buttons.push([
+        Markup.button.callback("🔄 Reset Auto", "set_cli:auto"),
+        Markup.button.callback("🔁 Refresh", "refresh_clis")
+    ]);
+
+    const text = `🛠 **Configuration CLI**\n\n` +
+        `Par défaut: **${currentCli}**\n` +
+        `Désactivés: ${session.disabledClis.length > 0 ? '`' + session.disabledClis.join(', ') + '`' : 'Aucun'}\n\n` +
+        `Appuyez sur [ON/OFF] pour activer une tuile.`;
+
+    if (ctx.callbackQuery) {
+        try {
+            return await ctx.editMessageText(text, { parse_mode: 'Markdown', ...Markup.inlineKeyboard(buttons) });
+        } catch (err) {
+            if (err.description && err.description.includes('message is not modified')) {
+                // Ignorer l'erreur si le message est identique
+                return;
+            }
+            throw err;
+        }
+    } else {
+        return ctx.reply(text, { parse_mode: 'Markdown', ...Markup.inlineKeyboard(buttons) });
+    }
+}
+
+bot.action(/set_cli:(.+)/, async (ctx) => {
+    try {
+        const session = getSession(ctx.chat.id);
+        const cliName = ctx.match[1];
+
+        if (cliName === 'auto') {
+            session.defaultCli = null;
+            session.disabledClis = []; // Réinitialiser aussi les CLI désactivés
+        } else if (AVAILABLE_CLIS.includes(cliName)) {
+            session.defaultCli = cliName;
+            // Si on le met par défaut, on l'active s'il était désactivé
+            session.disabledClis = session.disabledClis.filter(c => c !== cliName);
+        }
+
+        await ctx.answerCbQuery();
+        return renderCliSettings(ctx, session);
+    } catch (err) {
+        console.error('[Action Error] set_cli:', err);
+        return ctx.answerCbQuery('❌ Erreur lors du changement de CLI');
+    }
 });
 
 bot.action('refresh_clis', async (ctx) => {
-    await ctx.answerCbQuery('🔍 Scan en cours...');
-    await initAvailableClis();
-    
-    const buttons = AVAILABLE_CLIS.map(cli => 
-        [Markup.button.callback(`🔧 ${cli}`, `set_cli:${cli}`)]
-    );
-    buttons.push([Markup.button.callback("🔄 Auto (fallback)", "set_cli:auto")]);
-    
-    return ctx.editMessageText(
-        `🛠 **Configuration CLI**\n\n` +
-        `CLI installés: ${AVAILABLE_CLIS.length}\n` +
-        `Disponibles: ${AVAILABLE_CLIS.join(', ')}\n\n` +
-        `Choisissez un CLI par défaut :`,
-        { parse_mode: 'Markdown', ...Markup.inlineKeyboard(buttons) }
-    );
+    try {
+        await ctx.answerCbQuery('🔍 Scan en cours...');
+        await initAvailableClis();
+        const session = getSession(ctx.chat.id);
+        return renderCliSettings(ctx, session);
+    } catch (err) {
+        console.error('[Action Error] refresh_clis:', err);
+        return ctx.answerCbQuery('❌ Erreur lors du scan des CLI');
+    }
 });
 
 // --- COMMANDE /model ---
 bot.command('model', async (ctx) => {
     const session = getSession(ctx.chat.id);
     const args = ctx.message.text.split(' ').slice(1).join(' ').trim();
-    
+
     if (!args) {
         // Afficher le modèle actuel et les options avec boutons
         const currentModel = session.defaultModel || "⚡ Auto";
         const currentCli = session.defaultCli || FALLBACK_ORDER[0] || 'gemini';
-        
+
         // Récupérer les modèles pour le CLI actuel
         let modelsForCli = AVAILABLE_MODELS[currentCli] || [];
-        
+
         // Si pas de modèles détectés, essayer de les récupérer
         if (modelsForCli.length === 0 && AVAILABLE_CLIS.includes(currentCli)) {
             modelsForCli = await getAvailableModels(currentCli);
         }
-        
-        const buttons = modelsForCli.map(model => 
+
+        const buttons = modelsForCli.map(model =>
             [Markup.button.callback(`${session.defaultModel === model ? '✅' : '🤖'} ${model}`, `set_model:${model}`)]
         );
-        
+
         // Boutons pour changer de CLI
-        const cliButtons = AVAILABLE_CLIS.map(cli => 
+        const cliButtons = AVAILABLE_CLIS.map(cli =>
             [Markup.button.callback(`🔧 CLI: ${cli}`, `change_model_cli:${cli}`)]
         );
-        
+
         buttons.push([Markup.button.callback("🔄 Auto", "set_model:auto")]);
         buttons.push([Markup.button.callback("🔁 Refresh modèles", `refresh_models:${currentCli}`)]);
         buttons.push(...cliButtons);
-        
+
         return ctx.reply(
             `🤖 **Configuration Modèle**\n\n` +
             `Actuel: **${currentModel}**\n` +
@@ -230,14 +276,14 @@ bot.command('model', async (ctx) => {
             { parse_mode: 'Markdown', ...Markup.inlineKeyboard(buttons) }
         );
     }
-    
+
     // Si argument fourni directement
     const modelName = args.toLowerCase();
     if (modelName === 'auto') {
         session.defaultModel = null;
         return ctx.reply("✅ Modèle réinitialisé à **Auto**", { parse_mode: 'Markdown' });
     }
-    
+
     session.defaultModel = modelName;
     return ctx.reply(`✅ Modèle par défaut défini sur **${modelName}**`, { parse_mode: 'Markdown' });
 });
@@ -260,27 +306,27 @@ bot.action(/change_model_cli:(.+)/, async (ctx) => {
     const session = getSession(ctx.chat.id);
     const newCli = ctx.match[1];
     session.defaultCli = newCli;
-    
+
     // Récupérer les modèles pour le nouveau CLI
     let modelsForCli = AVAILABLE_MODELS[newCli] || [];
     if (modelsForCli.length === 0) {
         modelsForCli = await getAvailableModels(newCli);
     }
-    
+
     const currentModel = session.defaultModel || "⚡ Auto";
-    
-    const buttons = modelsForCli.map(model => 
+
+    const buttons = modelsForCli.map(model =>
         [Markup.button.callback(`${session.defaultModel === model ? '✅' : '🤖'} ${model}`, `set_model:${model}`)]
     );
-    
-    const cliButtons = AVAILABLE_CLIS.map(cli => 
+
+    const cliButtons = AVAILABLE_CLIS.map(cli =>
         [Markup.button.callback(`🔧 CLI: ${cli}`, `change_model_cli:${cli}`)]
     );
-    
+
     buttons.push([Markup.button.callback("🔄 Auto", "set_model:auto")]);
     buttons.push([Markup.button.callback("🔁 Refresh modèles", `refresh_models:${newCli}`)]);
     buttons.push(...cliButtons);
-    
+
     return ctx.editMessageText(
         `🤖 **Configuration Modèle**\n\n` +
         `Actuel: **${currentModel}**\n` +
@@ -294,24 +340,24 @@ bot.action(/change_model_cli:(.+)/, async (ctx) => {
 bot.action(/refresh_models:(.+)/, async (ctx) => {
     const cli = ctx.match[1];
     await ctx.answerCbQuery('🔍 Scan des modèles...');
-    
+
     const models = await getAvailableModels(cli);
     AVAILABLE_MODELS[cli] = models;
-    
+
     const session = getSession(ctx.chat.id);
     const currentModel = session.defaultModel || "⚡ Auto";
-    
-    const buttons = models.map(model => 
+
+    const buttons = models.map(model =>
         [Markup.button.callback(`${session.defaultModel === model ? '✅' : '🤖'} ${model}`, `set_model:${model}`)]
     );
-    
-    const cliButtons = AVAILABLE_CLIS.map(c => 
+
+    const cliButtons = AVAILABLE_CLIS.map(c =>
         [Markup.button.callback(`🔧 CLI: ${c}`, `change_model_cli:${c}`)]
     );
-    
+
     buttons.push([Markup.button.callback("🔄 Auto", "set_model:auto")]);
     buttons.push(...cliButtons);
-    
+
     return ctx.editMessageText(
         `🤖 **Configuration Modèle**\n\n` +
         `Actuel: **${currentModel}**\n` +
@@ -354,7 +400,7 @@ bot.command('settings', (ctx) => {
     const cli = session.defaultCli || "Auto (fallback chain)";
     const model = session.defaultModel || "Auto";
     const repo = session.activeRepo || "Aucun";
-    
+
     ctx.reply(
         `⚙️ **Paramètres de la session**\n\n` +
         `📁 Projet: **${repo}**\n` +
@@ -370,24 +416,24 @@ bot.command('settings', (ctx) => {
 bot.command('save', async (ctx) => {
     const session = getSession(ctx.chat.id);
     const args = ctx.message.text.split(' ').slice(1).join(' ').trim();
-    
+
     if (!session.activeRepo) {
         return ctx.reply("⚠️ Aucun projet actif. Utilisez /code d'abord.");
     }
-    
+
     // Sauvegarder les notes si fournies
     if (args) {
         session.saveNotes = args;
     }
-    
+
     const result = await manualSave(BASE_PROG_PATH, session);
-    
+
     if (result.success) {
         await ctx.reply(`💾 Session sauvegardée dans MEMORY!\n\n` +
             `📁 Projet: **${session.activeRepo}**\n` +
-            `📝 Notes: ${session.saveNotes || 'Aucune'}`, 
+            `📝 Notes: ${session.saveNotes || 'Aucune'}`,
             { parse_mode: 'Markdown' });
-        
+
         // Reset notes after save
         session.saveNotes = '';
     } else {
@@ -398,37 +444,37 @@ bot.command('save', async (ctx) => {
 // --- COMMANDE /history ---
 bot.command('history', async (ctx) => {
     const session = getSession(ctx.chat.id);
-    
+
     if (!session.activeRepo) {
         return ctx.reply("⚠️ Aucun projet actif. Utilisez /code d'abord.");
     }
-    
+
     const history = await loadSessionHistory(BASE_PROG_PATH, session.activeRepo);
-    
+
     if (history.length === 0) {
-        return ctx.reply(`📜 Aucune session précédente pour **${session.activeRepo}**`, 
+        return ctx.reply(`📜 Aucune session précédente pour **${session.activeRepo}**`,
             { parse_mode: 'Markdown' });
     }
-    
+
     let message = `📜 **Historique: ${session.activeRepo}**\n\n`;
     message += `${history.length} session(s) trouvée(s):\n\n`;
-    
+
     for (const sess of history.slice(0, 5)) {
         // Extraire la date du filename
         const dateMatch = sess.filename.match(/(\d{4}-\d{2}-\d{2})/);
         const date = dateMatch ? dateMatch[1] : 'Inconnue';
-        
+
         // Extraire le résumé du contenu
         const summaryMatch = sess.content.match(/## 🤖 Réponse IA\n([\s\S]*?)(?=\n##|$)/);
         const summary = summaryMatch ? summaryMatch[1].slice(0, 100) + '...' : 'Non disponible';
-        
+
         message += `📅 ${date}\n${summary}\n\n`;
     }
-    
+
     if (history.length > 5) {
         message += `... et ${history.length - 5} autres sessions.`;
     }
-    
+
     return ctx.reply(message, { parse_mode: 'Markdown' });
 });
 
@@ -439,7 +485,7 @@ bot.on('text', async (ctx) => {
 
     // Protection: ignorer les messages du bot lui-même
     if (ctx.from && ctx.from.is_bot) return;
-    
+
     // Protection: éviter les exécutions multiples
     if (session.isProcessing) {
         console.log('[Pipeline] Déjà en cours, message ignoré');
@@ -461,6 +507,14 @@ bot.on('text', async (ctx) => {
     // Marquer comme en cours de traitement
     session.isProcessing = true;
 
+    // Options personnalisées pour les agents (défini ici pour être accessible dans catch)
+    const agentOptions = {
+        defaultCli: session.defaultCli,
+        defaultModel: session.defaultModel,
+        disabledClis: session.disabledClis,
+        preferredCli: null
+    };
+
     const prompt = text;
     const targetPath = path.join(BASE_PROG_PATH, session.activeRepo);
     const statusMsg = await ctx.reply(`⏳ [${session.activeRepo}] Analyse...`);
@@ -470,12 +524,6 @@ bot.on('text', async (ctx) => {
     };
 
     try {
-        // Options personnalisées pour les agents
-        const agentOptions = {
-            defaultCli: session.defaultCli,
-            defaultModel: session.defaultModel,
-            preferredCli: null  // Sera défini après le premier succès
-        };
 
         // Variables pour la sauvegarde mémoire
         let finalCode = "", filesCreated = [], testResult = "", sessionSummary = "";
@@ -491,21 +539,29 @@ bot.on('text', async (ctx) => {
 
         while (attempt <= MAX_RETRIES + 1) {
             await sendEdit(`🧠 (Essai ${attempt}/${MAX_RETRIES + 1}) Réflexion...`);
-            
+
             // Architect - trouve le premier CLI qui marche
             const planResult = await runArchitectAgent(prompt, memoryContext, agentOptions);
             const plan = planResult.output;
             
+            console.log(`[Pipeline] Architect output length: ${plan?.length || 0}`);
+            console.log(`[Pipeline] Architect used CLI: ${planResult.usedCli}`);
+            console.log(`[Pipeline] Plan preview: ${plan?.slice(0, 200)}...`);
+
             // Utiliser le MÊME CLI pour Developer et TechLead
             agentOptions.preferredCli = planResult.usedCli;
             console.log(`[Pipeline] CLI utilisé: ${planResult.usedCli} (réutilisé pour Developer/TechLead)`);
-            
+
             // Developer - réutilise le même CLI
             const devResult = await runDeveloperAgent(plan, memoryContext, errorMessage, agentOptions);
             const devCode = devResult.output;
             
+            console.log(`[Pipeline] Developer output length: ${devCode?.length || 0}`);
+            console.log(`[Pipeline] Developer used CLI: ${devResult.usedCli}`);
+
             // TechLead - réutilise le même CLI
             const techResult = await runTechLeadAgent(devCode, agentOptions);
+            console.log(`[Pipeline] TechLead output length: ${techResult.output?.length || 0}`);
             finalCode = techResult.output;
 
             await sendEdit(`💾 (Essai ${attempt}/${MAX_RETRIES + 1}) Écriture...`);
@@ -527,8 +583,14 @@ bot.on('text', async (ctx) => {
 
         if (success) {
             await sendEdit(`🔄 Commit Git dans ${session.activeRepo}...`);
-            await autoCommitGit(targetPath, "VibeCode: " + prompt.slice(0, 30));
             
+            // Git commit optionnel (si le dossier est un repo Git)
+            try {
+                await autoCommitGit(targetPath, "VibeCode: " + prompt.slice(0, 30));
+            } catch (gitErr) {
+                console.warn(`[Actions] Git non initialisé dans ${session.activeRepo}, commit ignoré.`);
+            }
+
             // AUTO-SAVE: Sauvegarder la session dans MEMORY
             const saveResult = await saveSessionSummary(BASE_PROG_PATH, {
                 repo: session.activeRepo,
@@ -543,17 +605,17 @@ bot.on('text', async (ctx) => {
                 tags: ['auto-saved', 'success'],
                 notes: ''
             });
-            
+
             if (saveResult.success) {
                 console.log(`[Memory] Session auto-sauvegardée: ${saveResult.path}`);
             }
-            
+
             // Mettre à jour la session pour /save manuel
             session.lastPrompt = prompt;
             session.lastSummary = sessionSummary;
             session.lastFiles = filesCreated;
             session.lastTestResult = testResult;
-            
+
             await ctx.reply(`🎯 **Succès !**\n\n\`\`\`\n${finalCode.slice(0, 1000)}\n\`\`\``, { parse_mode: 'Markdown' });
         } else {
             // AUTO-SAVE même en cas d'échec
@@ -570,7 +632,7 @@ bot.on('text', async (ctx) => {
                 tags: ['auto-saved', 'failed'],
                 notes: `Erreur: ${errorMessage}`
             });
-            
+
             await ctx.reply(`❌ Échec après ${MAX_RETRIES + 1} essais.\n\nErreur: ${errorMessage}`);
         }
     } catch (e) {
@@ -602,13 +664,13 @@ bot.on('text', async (ctx) => {
 try {
     console.log("[Système] VibeCoder Orchestrator v2.5 - Role-based Fallback...");
     console.log("[Système] Commandes: /code, /cli, /model, /settings, /help, /save, /history");
-    
+
     // Initialiser les CLI disponibles
     initAvailableClis();
-    
+
     // Initialiser la mémoire
     initMemory(BASE_PROG_PATH);
-    
+
     bot.launch();
     console.log("[Telegram] Connecté.");
 } catch (e) { console.error(e); }

@@ -1,147 +1,27 @@
 import { execa } from 'execa';
+import { buildAgentConfig, getFormattedArgs } from './cli-detector.js';
 
 /**
- * CONFIGURATION DES PRIORITÉS PAR RÔLE
+ * PIPELINE MULTI-AGENTS
  * 
- * Analyse des forces par outil :
- * - Claude: Meilleur en planification/architecture (payant)
- * - Gemini: Meilleur en réflexion et UI (payant, free tier dispo)
- * - Codex: Rapide pour tâches courtes (payant)
- * - Qwen: Équilibré, bon compromis (gratuit)
- * - OpenCode: Dépend du modèle, dernier recours gratuit
- * 
- * Ordre de fallback optimisé par rôle et coût
+ * Les agents sont orchestrés avec un système de fallback dynamique.
+ * La configuration des outils est centralisée dans cli-detector.js.
  */
 
-// Configuration statique par défaut
-const DEFAULT_CONFIG = {
-    // Architecte - Modèles intelligents pour la planification (Claude, Gemini)
-    architect: [
-        { cmd: 'claude', args: ['-p'], promptAfterArgs: true, tier: 'premium' },
-        { cmd: 'gemini', args: ['--yolo', '-p'], promptAfterArgs: true, tier: 'freemium' },
-        { cmd: 'qwen', args: ['--yolo', '-p'], promptAfterArgs: true, tier: 'freemium' },
-        { cmd: 'codex', args: ['exec'], promptAfterArgs: true, tier: 'premium' },
-        { cmd: 'opencode', args: ['run'], promptAfterArgs: true, tier: 'free' }
-    ],
-    // Développeur - Bons en code, économiques (Codex rapide, Qwen équilibré)
-    developer: [
-        { cmd: 'codex', args: ['exec'], promptAfterArgs: true, tier: 'premium' },
-        { cmd: 'qwen', args: ['--yolo', '-p'], promptAfterArgs: true, tier: 'freemium' },
-        { cmd: 'gemini', args: ['--yolo', '-p'], promptAfterArgs: true, tier: 'freemium' },
-        { cmd: 'claude', args: ['-p'], promptAfterArgs: true, tier: 'premium' },
-        { cmd: 'opencode', args: ['run'], promptAfterArgs: true, tier: 'free' }
-    ],
-    // Tech Lead - Modèles intelligents pour réflexion/formatage (Gemini en tête)
-    techlead: [
-        { cmd: 'gemini', args: ['--yolo', '-p'], promptAfterArgs: true, tier: 'freemium' },
-        { cmd: 'claude', args: ['-p'], promptAfterArgs: true, tier: 'premium' },
-        { cmd: 'qwen', args: ['--yolo', '-p'], promptAfterArgs: true, tier: 'freemium' },
-        { cmd: 'codex', args: ['exec'], promptAfterArgs: true, tier: 'premium' },
-        { cmd: 'opencode', args: ['run'], promptAfterArgs: true, tier: 'free' }
-    ]
-};
+// Variable persistante pour la configuration chargée
+let GLOBAL_CONFIG = null;
 
-/**
- * Construit la configuration des agents basée sur les CLI disponibles
- * @returns {Promise<Object>} Configuration des agents
- */
-export async function buildAgentConfig() {
-    // Import dynamique pour éviter les cycles
-    const { scanAvailableClis } = await import('./cli-detector.js');
-    
-    try {
-        const clis = await scanAvailableClis();
-        
-        if (clis.length === 0) {
-            console.warn('[AgentConfig] Aucun CLI disponible, utilisation de la config par défaut');
-            return DEFAULT_CONFIG;
-        }
-        
-        // Ordre de priorité par rôle (optimisé pour forces + coût)
-        const priorityByRole = {
-            // Architect: Modèles intelligents (Claude, Gemini) pour planification
-            architect: ['claude', 'gemini', 'qwen', 'codex', 'opencode'],
-            // Developer: Code + économique (Codex rapide, Qwen équilibré)
-            developer: ['codex', 'qwen', 'gemini', 'claude', 'opencode'],
-            // Tech Lead: Réflexion + formatage (Gemini en tête)
-            techlead: ['gemini', 'claude', 'qwen', 'codex', 'opencode']
-        };
-        
-        const availableNames = clis.map(c => c.name);
-        
-        console.log('[AgentConfig] CLI disponibles:', availableNames.join(', '));
-        
-        // Construire la config pour chaque rôle
-        const buildRoleConfig = (roleName) => {
-            const priorityOrder = priorityByRole[roleName];
-            const orderedNames = priorityOrder.filter(name => availableNames.includes(name));
-            
-            console.log(`[AgentConfig] ${roleName}: ${orderedNames.join(' > ')}`);
-            
-            return orderedNames.map(cli => {
-                const args = getArgsForCli(cli);
-                const tier = getTierForCli(cli);
-                return { cmd: cli, args, promptAfterArgs: true, tier };
-            });
-        };
-        
-        return {
-            architect: buildRoleConfig('architect'),
-            developer: buildRoleConfig('developer'),
-            techlead: buildRoleConfig('techlead')
-        };
-    } catch (err) {
-        console.error('[AgentConfig] Erreur:', err.message);
-        return DEFAULT_CONFIG;
+async function ensureConfig() {
+    if (!GLOBAL_CONFIG) {
+        GLOBAL_CONFIG = await buildAgentConfig();
     }
+    return GLOBAL_CONFIG;
 }
-
-/**
- * Retourne les arguments pour un CLI donné
- */
-function getArgsForCli(cliName) {
-    switch (cliName) {
-        case 'claude':
-            return ['-p'];
-        case 'gemini':
-            return ['--yolo', '-p'];
-        case 'qwen':
-            return ['--yolo', '-p'];
-        case 'opencode':
-            return ['run'];
-        case 'codex':
-            return ['exec'];
-        default:
-            return ['-p'];
-    }
-}
-
-/**
- * Retourne le tier (coût) pour un CLI
- */
-function getTierForCli(cliName) {
-    switch (cliName) {
-        case 'claude':
-            return 'premium';    // Payant, meilleure qualité
-        case 'gemini':
-            return 'freemium';   // Free tier disponible
-        case 'qwen':
-            return 'freemium';   // Gratuit + payant selon modèle
-        case 'codex':
-            return 'premium';    // Payant
-        case 'opencode':
-            return 'free';       // Gratuit (dépend du modèle)
-        default:
-            return 'unknown';
-    }
-}
-
-// Export de la config par défaut pour usage immédiat
-export const CONFIG = DEFAULT_CONFIG;
 
 // Appel à l'Agent Architecte (Planification)
 export async function runArchitectAgent(prompt, context, options = {}) {
-    const { defaultCli, defaultModel } = options;
+    const config = await ensureConfig();
+    const { defaultCli, defaultModel, disabledClis = [] } = options;
 
     const fullPrompt = `Tu es un Architecte Logiciel Senior.
 Ton rôle est d'analyser la demande de l'utilisateur et le contexte existant, puis de générer un plan d'action d'implémentation robuste et élégant.
@@ -159,13 +39,14 @@ ${context}
 DEMANDE UTILISATEUR :
 ${prompt}`;
 
-    const result = await executeLimiter(fullPrompt, CONFIG.architect, defaultCli, defaultModel);
+    const result = await executeLimiter(fullPrompt, config.architect, { defaultCli, defaultModel, disabledClis });
     return { output: result.output, usedCli: result.usedCli };
 }
 
 // Appel à l'Agent Développeur (Génération de code)
 export async function runDeveloperAgent(plan, context, errorMessage = null, options = {}) {
-    const { defaultCli, defaultModel, preferredCli } = options;
+    const config = await ensureConfig();
+    const { defaultCli, defaultModel, preferredCli, disabledClis = [] } = options;
 
     let fullPrompt = `Tu es une IA Développeur Full-Stack Senior.
 Ton rôle est d'écrire le code fonctionnel, propre et optimisé en suivant strictement le plan de l'Architecte.
@@ -178,7 +59,7 @@ CONSIGNES :
 CONTEXTE MÉMOIRE (QMD) :
 ${context}
 
-PLAN DE L'ARCHITECTE :
+PLAN DE l'ARCHITECTE :
 ${plan}
 `;
 
@@ -191,15 +72,15 @@ Analyse la cause racine et corrige ton implémentation.
 `;
     }
 
-    // Utiliser le même CLI que l'architecte si disponible
     const cliToUse = preferredCli || defaultCli;
-    const result = await executeLimiter(fullPrompt, CONFIG.developer, cliToUse, defaultModel);
+    const result = await executeLimiter(fullPrompt, config.developer, { defaultCli: cliToUse, defaultModel, disabledClis });
     return { output: result.output, usedCli: result.usedCli };
 }
 
 // Appel à l'Agent Tech Lead (Formatage final et consignes strictes)
 export async function runTechLeadAgent(developerCode, options = {}) {
-    const { defaultCli, defaultModel, preferredCli } = options;
+    const config = await ensureConfig();
+    const { defaultCli, defaultModel, preferredCli, disabledClis = [] } = options;
 
     const fullPrompt = `Tu es le Tech Lead et Garant de la Qualité.
 Ton rôle est de prendre le code du Développeur, d'en assurer la validité technique, et de le formater STRICTEMENT pour l'orchestrateur système.
@@ -214,38 +95,36 @@ CONSIGNES DE FORMATAGE (OBLIGATOIRE) :
 2. Spécifie la commande de test finale tout à la fin :
 ### RUN: commande_de_test
 
+IMPORTANT : Assure-toi qu'il n'y a AUCUN espace ou texte parasite entre le marqueur ### FILE: et le début du bloc de code (\`\`\`).
+
 ZÉRO TEXTE INTRODUCTIF. ZÉRO BLA-BLA. JUSTE LE FORMAT TECHNIQUE.
 
 CODE À TRAITER :
 ${developerCode}`;
 
-    // Utiliser le même CLI que le developer si disponible
     const cliToUse = preferredCli || defaultCli;
-    const result = await executeLimiter(fullPrompt, CONFIG.techlead, cliToUse, defaultModel);
+    const result = await executeLimiter(fullPrompt, config.techlead, { defaultCli: cliToUse, defaultModel, disabledClis });
     return { output: result.output, usedCli: result.usedCli };
 }
 
 /**
- * Fonction utilitaire pour exécuter l'appel CLI avec une liste de priorités (fallback)
- * @param {string} prompt - Le prompt à envoyer à l'IA
- * @param {Array} configList - La liste des configurations d'agents à essayer
- * @param {string} defaultCli - Le CLI par défaut à utiliser (optionnel)
- * @param {string} defaultModel - Le modèle par défaut à utiliser (optionnel)
- * @returns {Promise<{output: string, usedCli: string}>} Résultat + CLI utilisé
+ * Exécute l'appel CLI avec fallback
  */
-async function executeLimiter(prompt, configList, defaultCli = null, defaultModel = null) {
+async function executeLimiter(prompt, configList, options = {}) {
+    const { defaultCli = null, defaultModel = null, disabledClis = [] } = options;
     let lastError = null;
 
-    // Si un CLI par défaut est spécifié, on l'utilise en premier
-    let agentsToTry = [...configList];
+    let agentsToTry = configList.filter(agent => !disabledClis.includes(agent.cmd));
 
-    if (defaultCli) {
-        // Trouver le CLI par défaut dans la config
-        const defaultAgent = configList.find(a => a.cmd === defaultCli);
-        if (defaultAgent) {
-            // Le mettre en premier de la liste
-            agentsToTry = [defaultAgent, ...configList.filter(a => a.cmd !== defaultCli)];
-            console.log(`[Agent] CLI personnalisé: **${defaultCli}** en priorité`);
+    if (agentsToTry.length === 0) {
+        throw new Error("Aucun CLI disponible (tous désactivés).");
+    }
+
+    if (defaultCli && !disabledClis.includes(defaultCli)) {
+        const defaultIdx = agentsToTry.findIndex(a => a.cmd === defaultCli);
+        if (defaultIdx !== -1) {
+            const agent = agentsToTry.splice(defaultIdx, 1)[0];
+            agentsToTry.unshift(agent);
         }
     }
 
@@ -253,44 +132,37 @@ async function executeLimiter(prompt, configList, defaultCli = null, defaultMode
         try {
             console.log(`[Agent] Tentative avec ${agentConfig.cmd}...`);
 
-            // Construire les arguments avec le modèle personnalisé si spécifié
-            let fullArgs = [...agentConfig.args];
-
-            // Ajouter le modèle si spécifié et si l'outil le supporte
-            const modelToUse = defaultModel || agentConfig.defaultModel;
-            if (modelToUse && agentConfig.cmd !== 'opencode') {
-                fullArgs.push('-m', modelToUse);
-            }
-
-            // Ajouter le prompt à la fin
-            fullArgs.push(prompt);
+            // Construction des arguments via la source de vérité
+            const formatted = getFormattedArgs(agentConfig.cmd, defaultModel, prompt);
+            const fullArgs = formatted.args;
+            const input = formatted.input;  // Prompt pour stdin si nécessaire
 
             const result = await execa(agentConfig.cmd, fullArgs, {
-                stdin: 'ignore',
+                stdin: input ? 'pipe' : 'ignore',  // stdin: 'pipe' si on passe un prompt
+                input: input,  // Le prompt via stdin
                 stdout: 'pipe',
                 stderr: 'pipe',
-                timeout: 45000,
-                shell: false,
-                reject: false,
+                timeout: 60000, // Augmenté à 60s pour les prompts complexes
+                shell: process.platform === 'win32', // Ajustement pour Windows
+                windowsHide: true, // Éviter AttachConsole failed sur Windows
+                reject: false,     // Ne pas crash sur erreur CLI, on veut le fallback
                 stripFinalNewline: true
             });
 
-            // Check for actual failure conditions
             if (result.failed || result.exitCode !== 0 || !result.stdout.trim()) {
-                const errorMsg = result.stderr || result.error?.message || `Exit code: ${result.exitCode}`;
-                throw new Error(errorMsg);
+                console.warn(`[Agent] ${agentConfig.cmd} sortie vide ou erreur. Exit: ${result.exitCode}, Stdout length: ${result.stdout?.length || 0}`);
+                throw new Error(result.stderr || `Code de sortie: ${result.exitCode}`);
             }
 
-            console.log(`[Agent] ${agentConfig.cmd} réussi.`);
-            // Retourne le résultat + le CLI utilisé pour le réutiliser
+            console.log(`[Agent] ${agentConfig.cmd} réussi. Output length: ${result.stdout.length}`);
             return { output: result.stdout, usedCli: agentConfig.cmd };
         } catch (error) {
             console.warn(`[Agent] Échec de ${agentConfig.cmd}: ${error.message}`);
             lastError = error;
-            // Continue to next agent in fallback chain
         }
     }
 
-    console.error(`[Agent] Échec critique : tous les agents de la pipeline ont échoué.`);
-    throw new Error(`Échec de génération global. Dernier message: ${lastError?.message || 'Inconnu'}`);
+    throw new Error(`Échec global. Dernier message: ${lastError?.message}`);
 }
+
+export { buildAgentConfig };

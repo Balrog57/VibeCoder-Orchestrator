@@ -5,15 +5,38 @@ import { execa } from 'execa';
 /**
  * Parcourt le texte généré par l'IA et extrait les blocs de code pour les écrire sur le disque.
  * Format attendu :
- * ### FILE: chemin/du/fichier.js
- * ```js
- * code
+ * 1. Pour chaque fichier à créer ou modifier :
+ * ### FILE: chemin/vers/fichier.ext
+ * ```language
+ * // code complet
  * ```
+ *
+ * 2. Spécifie la commande de test finale tout à la fin :
+ * ### RUN: commande_de_test
+ *
+ * IMPORTANT : Assure-toi qu'il n'y a AUCUN espace ou texte entre le marqueur ### FILE: et le début du bloc de code (```).
+ *
+ * ZÉRO TEXTE INTRODUCTIF. ZÉRO BLA-BLA. JUSTE LE FORMAT TECHNIQUE.
  */
 export async function applyCodeToFiles(llmOutput, repoPath) {
-    const fileRegex = /### FILE:\s*([^\r\n]+)\r?\n```[^\r\n]*\r?\n([\s\S]*?)```/g;
+    // Regex ultra-robuste V4 supportant gras (**), backticks, espaces variés, préfixes et sauts de lignes optionnels
+    const fileRegex = /(?:\*\*|#|>\s*)?### FILE:\s*[\*`]*\s*([^\s\*`\r\n]+)\s*[\*`]*\s*[\s\S]*?```[^\r\n]*\r?\n([\s\S]*?)```/gi;
     let match;
     let filesWritten = [];
+
+    // Log pour debug si aucun match
+    const hasMatch = fileRegex.test(llmOutput);
+    fileRegex.lastIndex = 0; // Reset après le test
+
+    if (!hasMatch) {
+        console.log('[Actions] Aucun bloc de code détecté. Analyse du contenu brut...');
+        // Sauvegarder l'output problématique pour analyse si nécessaire
+        try {
+            const debugFile = path.join(repoPath, 'debug-last-failed-output.txt');
+            await fs.writeFile(debugFile, llmOutput, 'utf-8');
+            console.log(`[Actions] Output brut sauvegardé dans ${debugFile}`);
+        } catch (e) { }
+    }
 
     while ((match = fileRegex.exec(llmOutput)) !== null) {
         const relativeFilePath = match[1].trim();
