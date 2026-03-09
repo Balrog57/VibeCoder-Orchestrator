@@ -1,31 +1,23 @@
 /**
- * @file hello-vibe.js
- * @description Script minimaliste pour valider la chaîne de déploiement VibeCoder Orchestrator.
- * @version 1.0.0
- * @license MIT
+ * Hello Vibe - Script de validation pour VibeCoder Orchestrator
+ * 
+ * Ce script teste la chaîne de déploiement de l'orchestrateur
+ * avec un cas d'usage simple et modulaire (ESM).
  */
 
-// Export d'une constante pour tester la modularité ESM (Phase B.1)
-export const GREETING = "Hello from VibeCoder Orchestrator v2.5!";
+const MESSAGE = 'Hello, VibeCoder! 🚀';
 
 /**
- * Fonction principale affichant le message de bienvenue avec gestion d'erreurs (Phase C.3).
+ * Affiche le message de bienvenue
+ * @returns {string} Le message Hello Vibe
  */
-export function sayHello() {
-    try {
-        console.log("\n=========================================");
-        console.log(GREETING);
-        console.log(`Horodatage : ${new Date().toISOString()}`);
-        console.log("Statut : Pipeline validé avec succès.");
-        console.log("=========================================\n");
-    } catch (error) {
-        console.error("Erreur lors de l'exécution du script hello-vibe :", error.message);
-        process.exit(1);
-    }
+function helloVibe() {
+    console.log(MESSAGE);
+    return MESSAGE;
 }
 
-// Exécution si le script est lancé directement par Node (Phase C.1)
-const isMainModule = import.meta.url === `file://${process.argv[1]}` || process.argv[1]?.endsWith('hello-vibe.js');
-if (isMainModule) {
-    sayHello();
-}
+// Exécution principale
+helloVibe();
+
+// Export pour tests et modularité
+export { helloVibe, MESSAGE };
