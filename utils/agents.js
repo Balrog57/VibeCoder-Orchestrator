@@ -8,28 +8,34 @@ const CONFIG = {
     // Architecte : Claude Code (Opus) > Gemini Pro > Codex
     architect: [
         { cmd: 'claude', args: ['--model', 'opus', '--prompt'] },
-        { cmd: 'gemini', args: ['--prompt'] },
+        { cmd: 'gemini', args: ['--prompt', '--yolo'] },
         { cmd: 'codex', args: ['run'] }
     ],
     // Développeur : Codex > Claude Sonnet > Gemini Flash
     developer: [
         { cmd: 'codex', args: ['run'] },
         { cmd: 'claude', args: ['--model', 'sonnet', '--prompt'] },
-        { cmd: 'gemini', args: ['--prompt'] }
+        { cmd: 'gemini', args: ['--prompt', '--yolo'] }
     ],
     // Tech Lead : Claude Sonnet > Gemini Pro > Codex
     techlead: [
         { cmd: 'claude', args: ['--model', 'sonnet', '--prompt'] },
-        { cmd: 'gemini', args: ['--prompt'] },
+        { cmd: 'gemini', args: ['--prompt', '--yolo'] },
         { cmd: 'codex', args: ['run'] }
     ]
 };
 
 // Appel à l'Agent Architecte (Planification)
 export async function runArchitectAgent(prompt, context) {
-    const fullPrompt = `Tu es un Architecte Logiciel.
-Ton rôle est d'analyser la demande de l'utilisateur et le contexte existant, puis de générer un plan d'action d'implémentation clair.
-NE GÉNÈRE PAS DE CODE. Fournis uniquement les étapes nécessaires.
+    const fullPrompt = `Tu es un Architecte Logiciel Senior.
+Ton rôle est d'analyser la demande de l'utilisateur et le contexte existant, puis de générer un plan d'action d'implémentation robuste et élégant.
+
+OBJECTIFS :
+1. Définir une architecture modulaire et scalable.
+2. Identifier les composants impactés.
+3. Prévoir les étapes d'implémentation logicalment ordonnées.
+
+NE GÉNÈRE PAS DE CODE. Fournis uniquement les étapes nécessaires sous forme de plan stratégique.
 
 CONTEXTE MÉMOIRE (QMD) :
 ${context}
@@ -42,8 +48,13 @@ ${prompt}`;
 
 // Appel à l'Agent Développeur (Génération de code)
 export async function runDeveloperAgent(plan, context, errorMessage = null) {
-    let fullPrompt = `Tu es une IA Développeur Senior.
-Ton rôle est d'écrire le code fonctionnel en suivant le plan de l'Architecte.
+    let fullPrompt = `Tu es une IA Développeur Full-Stack Senior.
+Ton rôle est d'écrire le code fonctionnel, propre et optimisé en suivant strictement le plan de l'Architecte.
+
+CONSIGNES :
+- Utilise les meilleures pratiques du langage concerné.
+- Inclus la gestion d'erreurs et des commentaires pertinents.
+- Assure-toi que le code est immédiatement exécutable.
 
 CONTEXTE MÉMOIRE (QMD) :
 ${context}
@@ -54,9 +65,10 @@ ${plan}
 
     if (errorMessage) {
         fullPrompt += `
-ATTENTION : La précédente exécution a échoué avec l'erreur suivante :
+⚠️ ERREUR CRITIQUE À CORRIGER :
+La précédente exécution a échoué avec l'erreur suivante :
 ${errorMessage}
-Corrige ton code en conséquence.
+Analyse la cause racine et corrige ton implémentation.
 `;
     }
 
@@ -65,20 +77,22 @@ Corrige ton code en conséquence.
 
 // Appel à l'Agent Tech Lead (Formatage final et consignes strictes)
 export async function runTechLeadAgent(developerCode) {
-    const fullPrompt = `Tu es le Tech Lead.
-Ton rôle est de prendre le code fourni par le Développeur, de le vérifier, et de le formater STRICTEMENT selon les consignes ci-dessous pour l'orchestrateur.
+    const fullPrompt = `Tu es le Tech Lead et Garant de la Qualité.
+Ton rôle est de prendre le code du Développeur, d'en assurer la validité technique, et de le formater STRICTEMENT pour l'orchestrateur système.
 
-CONSIGNES STRICTES DE FORMATAGE (OBLIGATOIRE) :
-1. Pour CHAQUE fichier à créer ou modifier, tu dois utiliser ce format exact :
-### FILE: chemin/vers/le/fichier.ext
+CONSIGNES DE FORMATAGE (OBLIGATOIRE) :
+1. Formate chaque fichier avec ce marqueur précis :
+### FILE: chemin/vers/fichier.ext
 \`\`\`language
-// le code complet du fichier
+// code complet
 \`\`\`
 
-2. Pour la commande de test à exécuter après l'écriture, tu dois utiliser ce format exact (À la toute fin) :
-### RUN: commande de test à lancer
+2. Spécifie la commande de test finale tout à la fin :
+### RUN: commande_de_test
 
-CODE DU DÉVELOPPEUR À FORMATER :
+ZÉRO TEXTE INTRODUCTIF. ZÉRO BLA-BLA. JUSTE LE FORMAT TECHNIQUE.
+
+CODE À TRAITER :
 ${developerCode}`;
 
     return await executeLimiter(fullPrompt, CONFIG.techlead);
