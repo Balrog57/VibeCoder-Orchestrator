@@ -802,8 +802,28 @@ bot.action('approve_plan', async (ctx) => {
                 attempt++; continue;
             }
 
-            await sendEdit(`⚡ (Essai ${attempt}/${MAX_RETRIES + 1}) Tests...`);
-            const test = await executeAndTest(finalCode, targetPath);
+            await sendEdit(`⚡ (Essai ${attempt}/${MAX_RETRIES + 1}) Lancement des tests...`);
+
+            let logBuffer = "";
+            let lastEditTime = 0;
+            const onLog = (out, err) => {
+                const now = Date.now();
+                if (out) logBuffer += out;
+                if (err) logBuffer += err;
+
+                // Garder les 1000 derniers caractères pour éviter la limite Telegram
+                if (logBuffer.length > 1000) {
+                    logBuffer = logBuffer.substring(logBuffer.length - 1000);
+                }
+
+                if (now - lastEditTime > 1500) {
+                    lastEditTime = now;
+                    // Ne pas utiliser await pour ne pas bloquer le stream
+                    sendEdit(`⚡ (Essai ${attempt}/${MAX_RETRIES + 1}) Tests en cours...\n\n\`\`\`text\n${logBuffer}\n\`\`\``).catch(() => { });
+                }
+            };
+
+            const test = await executeAndTest(finalCode, targetPath, onLog);
             testResult = test.message || test.error;
             if (test.success) { success = true; break; }
             errorMessage = test.error; attempt++;

@@ -182,7 +182,7 @@ export async function applyCodeToFiles(llmOutput, repoPath) {
 /**
  * Extrait la commande de test "### RUN: commande" et l'exécute avec timeout
  */
-export async function executeAndTest(llmOutput, repoPath) {
+export async function executeAndTest(llmOutput, repoPath, onProgress = null) {
     const runRegex = /### RUN:\s*([^\r\n]+)/;
     const match = runRegex.exec(llmOutput);
 
@@ -200,12 +200,18 @@ export async function executeAndTest(llmOutput, repoPath) {
         const args = commandToRun.split(' ');
         const cmd = args.shift();
 
-        const { stdout, stderr } = await execa(cmd, args, {
+        const child = execa(cmd, args, {
             cwd: repoPath,
             timeout: 15000,
             shell: true // Toléré ici pour certains scripts, mais attention aux injections si variables non contrôlées
         });
 
+        if (onProgress) {
+            child.stdout?.on('data', data => onProgress(data.toString(), null));
+            child.stderr?.on('data', data => onProgress(null, data.toString()));
+        }
+
+        const { stdout, stderr } = await child;
         return { success: true, message: `Test réussi:\n${stdout}` };
     } catch (err) {
         console.error(`[Actions] Erreur lors de l'exécution de: ${commandToRun}`);
