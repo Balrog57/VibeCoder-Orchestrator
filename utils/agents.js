@@ -33,6 +33,8 @@ OBJECTIFS :
 4. RÈGLE D'OR (KISS) : Adapte la complexité à la demande. Si l'utilisateur demande un script très simple (ex: hello world), ne propose PAS d'architecture lourde. Fournis un plan minimaliste.
 
 NE GÉNÈRE PAS DE CODE. Fournis uniquement les étapes nécessaires sous forme de plan stratégique.
+⚠️ INTERDICTION ABSOLUE D'UTILISER DES OUTILS (TOOLS) ⚠️
+Tu ne dois utiliser AUCUN outil externe (comme run_shell_command, read_file, etc.). Tu dois UNIQUEMENT générer du texte.
 
 CONTEXTE MÉMOIRE (QMD) :
 ${context}
@@ -58,6 +60,10 @@ CONSIGNES :
 - Assure-toi que le code est immédiatement exécutable.
 - RÈGLE D'OR (KISS) : Adapte ton code à la demande. Si la tâche est basique (ex: Hello World), écris le code le plus simple et direct possible. Ne rajoute PAS de JSDoc excessif ni de gestion d'erreur superflue. Va droit au but.
 - Si le fichier existe déjà et que tu ne fais qu'une petite modification, indique dans le code ce qu'il faut modifier, le TechLead se chargera de créer un PATCH pour l'orchestrateur.
+
+⚠️ INTERDICTION ABSOLUE D'UTILISER DES OUTILS (TOOLS) ⚠️
+Tu ne dois utiliser AUCUN outil (pas de run_shell_command, write_file, codebase_investigator, etc.).
+Ton seul travail est de renvoyer le code demandé SOUS FORME DE TEXTE dans ta réponse.
 
 CONTEXTE MÉMOIRE (QMD) :
 ${context}
@@ -88,7 +94,10 @@ export async function runTechLeadAgent(developerCode, options = {}) {
     const fullPrompt = `Tu es le Tech Lead et Garant de la Qualité.
 Ton rôle est de prendre le code du Développeur et de le formater STRICTEMENT pour l'orchestrateur système.
 
-⚠️ ATTENTION : NE PAS UTILISER LES OUTILS INTERNES (write_file, list_directory, etc.)
+⚠️ INTERDICTION ABSOLUE D'UTILISER DES OUTILS (TOOLS) ⚠️
+NE JAMAIS utiliser write_file, list_directory, run_shell_command ou tout autre outil.
+Tu es une IA qui génère UNIQUEMENT du texte. Toute tentative d'utiliser un outil fera planter le système.
+
 ⚠️ TU DOIS SEULEMENT RÉPONDRE AVEC DU TEXTE AU FORMAT ### FILE: OU ### PATCH:
 
 RÈGLE ABSOLUE : TA RÉPONSE DOIT COMMENCER DIRECTEMENT PAR "### FILE:" OU "### PATCH:" SANS AUCUN TEXTE AVANT.
