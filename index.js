@@ -709,19 +709,33 @@ bot.on('text', async (ctx) => {
                 previewPlanText = previewPlanText.substring(0, 3500) + "\n\n[...Plan tronqué pour Telegram...]";
             }
 
-            await ctx.telegram.editMessageText(
-                ctx.chat.id,
-                statusMsg.message_id,
-                null,
-                `🏗️ **Plan de l'Architecte :**\n\n${previewPlanText}\n\n👉 *Accepter ce plan et lancer le développement ?*`,
-                {
-                    parse_mode: 'Markdown',
-                    ...Markup.inlineKeyboard([
-                        [Markup.button.callback('✅ Appliquer & Coder', 'approve_plan')],
-                        [Markup.button.callback('❌ Rejeter', 'reject_plan')]
-                    ])
-                }
-            );
+            const messageText = `🏗️ **Plan de l'Architecte :**\n\n${previewPlanText}\n\n👉 *Accepter ce plan et lancer le développement ?*`;
+            const keyboardMarkup = Markup.inlineKeyboard([
+                [Markup.button.callback('✅ Appliquer & Coder', 'approve_plan')],
+                [Markup.button.callback('❌ Rejeter', 'reject_plan')]
+            ]);
+
+            try {
+                await ctx.telegram.editMessageText(
+                    ctx.chat.id,
+                    statusMsg.message_id,
+                    null,
+                    messageText,
+                    {
+                        parse_mode: 'Markdown',
+                        ...keyboardMarkup
+                    }
+                );
+            } catch (mdError) {
+                console.warn("[Telegram] Erreur de parsing Markdown, fallback en texte brut:", mdError.message);
+                await ctx.telegram.editMessageText(
+                    ctx.chat.id,
+                    statusMsg.message_id,
+                    null,
+                    messageText,
+                    keyboardMarkup
+                );
+            }
             return; // FIN DE LA PREMIÈRE PARTIE
         }
     } catch (e) {
