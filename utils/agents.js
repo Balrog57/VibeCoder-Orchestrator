@@ -57,6 +57,7 @@ CONSIGNES :
 - Inclus la gestion d'erreurs pertinents, mais ne sur-ingénie pas.
 - Assure-toi que le code est immédiatement exécutable.
 - RÈGLE D'OR (KISS) : Adapte ton code à la demande. Si la tâche est basique (ex: Hello World), écris le code le plus simple et direct possible. Ne rajoute PAS de JSDoc excessif ni de gestion d'erreur superflue. Va droit au but.
+- Si le fichier existe déjà et que tu ne fais qu'une petite modification, indique dans le code ce qu'il faut modifier, le TechLead se chargera de créer un PATCH pour l'orchestrateur.
 
 CONTEXTE MÉMOIRE (QMD) :
 ${context}
@@ -88,27 +89,39 @@ export async function runTechLeadAgent(developerCode, options = {}) {
 Ton rôle est de prendre le code du Développeur et de le formater STRICTEMENT pour l'orchestrateur système.
 
 ⚠️ ATTENTION : NE PAS UTILISER LES OUTILS INTERNES (write_file, list_directory, etc.)
-⚠️ TU DOIS SEULEMENT RÉPONDRE AVEC DU TEXTE AU FORMAT ### FILE:
+⚠️ TU DOIS SEULEMENT RÉPONDRE AVEC DU TEXTE AU FORMAT ### FILE: OU ### PATCH:
 
-RÈGLE ABSOLUE : TA RÉPONSE DOIT COMMENCER DIRECTEMENT PAR "### FILE:" SANS AUCUN TEXTE AVANT.
+RÈGLE ABSOLUE : TA RÉPONSE DOIT COMMENCER DIRECTEMENT PAR "### FILE:" OU "### PATCH:" SANS AUCUN TEXTE AVANT.
 
-FORMAT EXIGÉ (exemple) :
+Si tu dois CRÉER ou RÉÉCRIRE TOTALEMENT un fichier, utilise ce format :
 ### FILE: src/components/Button.js
 \`\`\`javascript
 // Le code complet du fichier ici
 export const Button = () => {...};
 \`\`\`
 
+Si tu dois MODIFIER UN FICHIER EXISTANT (Patching intelligent), utilise ce format :
+### PATCH: src/components/Button.js
+<<<<
+Ligne exacte du code original à remplacer
+====
+Ligne avec le nouveau code
+>>>>
+
+règles pour ### PATCH:
+- Le bloc original \`<<<<\` doit correspondre EXACTEMENT au code existant.
+- Garde l'indentation de façon identique.
+
 ### RUN: npm test
 
 INTERDIT :
 - AUCUNE introduction ("Voici le code...", "Je suis le Tech Lead...", etc.)
 - AUCUNE explication avant le code
-- AUCUN emoji ou titre avant "### FILE:"
+- AUCUN emoji ou titre avant "### FILE:" ou "### PATCH:"
 - AUCUN outil interne (write_file, edit_file, etc.) - JUSTE DU TEXTE !
 - AUCUNE écriture dans MEMORY/ ou d'autres dossiers
 
-SI TU AJOUTES DU TEXTE AVANT "### FILE:" OU SI TU UTILISES DES OUTILS, TOUT LE SYSTÈME PLANTE.
+SI TU AJOUTES DU TEXTE AVANT LES MARQUEURS OU SI TU UTILISES DES OUTILS, TOUT LE SYSTÈME PLANTE.
 
 CODE À TRAITER :
 ${developerCode}`;

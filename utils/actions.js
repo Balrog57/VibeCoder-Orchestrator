@@ -22,6 +22,8 @@ export async function applyCodeToFiles(llmOutput, repoPath) {
     // Regex simplifiée et robuste pour ### FILE:
     // Match: ### FILE: chemin/vers/fichier.ext suivi d'un bloc de code
     const fileRegex = /### FILE:\s*([^\s\r\n]+)\s*\n```([^\n]*)\r?\n([\s\S]*?)```/gi;
+    const patchRegex = /### PATCH:\s*([^\s\r\n]+)\s*\r?\n<<<<\r?\n([\s\S]*?)\r?\n====\r?\n([\s\S]*?)\r?\n>>>>/gi;
+
     let match;
     let filesWritten = [];
 
@@ -30,10 +32,15 @@ export async function applyCodeToFiles(llmOutput, repoPath) {
     console.log(`[Actions] Premier 200 chars: ${llmOutput.slice(0, 200)}`);
 
     // Log pour debug si aucun match
-    const hasMatch = fileRegex.test(llmOutput);
+    const hasFileMatch = fileRegex.test(llmOutput);
     fileRegex.lastIndex = 0; // Reset après le test
 
-    console.log(`[Actions] Has ### FILE: matches: ${hasMatch}`);
+    const hasPatchMatch = patchRegex.test(llmOutput);
+    patchRegex.lastIndex = 0; // Reset après le test
+
+    const hasMatch = hasFileMatch || hasPatchMatch;
+
+    console.log(`[Actions] Has ### FILE: matches: ${hasFileMatch}, Has ### PATCH: matches: ${hasPatchMatch}`);
 
     if (!hasMatch) {
         console.log('[Actions] Aucun bloc de code détecté avec ### FILE:. Analyse du contenu brut...');
@@ -139,6 +146,33 @@ export async function applyCodeToFiles(llmOutput, repoPath) {
         } catch (err) {
             console.error(`[Actions] Erreur d'écriture pour le fichier ${absolutePath}:`, err);
             throw new Error(`Erreur d'écriture sur ${relativeFilePath}: ${err.message}`);
+        }
+    }
+
+    // --- APPLICATION DES PATCHS ---
+    while ((match = patchRegex.exec(llmOutput)) !== null) {
+        const relativeFilePath = match[1].trim();
+        const originalCode = match[2];
+        const newCode = match[3];
+
+        console.log(`[Actions] Patch trouvé pour: ${relativeFilePath}`);
+        const absolutePath = path.join(repoPath, relativeFilePath);
+
+        try {
+            const currentContent = await fs.readFile(absolutePath, 'utf-8');
+
+            // On vérifie si on trouve le bloc exact
+            if (!currentContent.includes(originalCode)) {
+                throw new Error(`Le bloc original à remplacer n'a pas été trouvé dans le fichier.`);
+            }
+
+            const updatedContent = currentContent.replace(originalCode, newCode);
+            await fs.writeFile(absolutePath, updatedContent, 'utf-8');
+            filesWritten.push(relativeFilePath);
+            console.log(`[Actions] Patch appliqué sur : ${absolutePath}`);
+        } catch (err) {
+            console.error(`[Actions] Erreur d'application du patch sur ${absolutePath}:`, err);
+            throw new Error(`Erreur de patch sur ${relativeFilePath}: ${err.message}`);
         }
     }
 
