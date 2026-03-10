@@ -25,7 +25,6 @@ const CLI_CONFIG = {
         inputMode: 'stdin',  // Prompt via stdin pour éviter les conflits
         promptFlag: '--prompt',
         modelFlag: '-m',
-        extraArgs: ['--yolo'],
         description: 'Meilleur en réflexion/UI (free tier)'
     },
     codex: {
@@ -46,7 +45,6 @@ const CLI_CONFIG = {
         inputMode: 'stdin',  // Prompt via stdin pour éviter les conflits
         promptFlag: '-p',
         modelFlag: '-m',
-        extraArgs: ['--yolo'],
         description: 'Équilibré (gratuit + payant)'
     },
     opencode: {
@@ -188,9 +186,12 @@ export async function buildAgentConfig() {
     const availableNames = available.map(c => c.name);
 
     const priorityByRole = {
+        // Claude/Gemini pour la réflexion et planification
         architect: ['claude', 'gemini', 'qwen', 'codex', 'opencode'],
+        // Codex/Qwen pour le code rapide et économique
         developer: ['codex', 'qwen', 'gemini', 'claude', 'opencode'],
-        techlead: ['gemini', 'claude', 'qwen', 'codex', 'opencode']
+        // Qwen en premier pour le formatage (Gemini YOLO pose des problèmes)
+        techlead: ['qwen', 'claude', 'gemini', 'codex', 'opencode']
     };
 
     const buildRoleConfig = (role) => {

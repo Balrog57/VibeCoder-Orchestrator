@@ -1,7 +1,6 @@
 import 'dotenv/config';
 import { Telegraf, Markup } from 'telegraf';
 import path from 'path';
-import fs from 'fs/promises';
 import {
     initMemory,
     queryMemory,
@@ -33,7 +32,6 @@ const REPO_PATH = process.cwd();
 
 // --- GESTION DES SESSIONS ---
 const sessions = {};
-const pendingPlans = {}; // Stockage temporaire des plans en attente de validation
 let AVAILABLE_CLIS = [];      // Sera peuplé dynamiquement
 let AVAILABLE_MODELS = {};    // { claude: [...], gemini: [...] }
 let FALLBACK_ORDER = [];      // Ordre de fallback dynamique
@@ -550,61 +548,6 @@ bot.command('settings', async (ctx) => {
     );
 });
 
-// --- COMMANDE /ls ---
-bot.command('ls', async (ctx) => {
-    const session = getSession(ctx.chat.id);
-    if (!session.activeRepo) {
-        return ctx.reply("⚠️ Tapez /code pour choisir un projet d'abord.");
-    }
-
-    const arg = ctx.message.text.split(' ').slice(1).join(' ').trim();
-    const targetPath = arg ? path.join(BASE_PROG_PATH, session.activeRepo, arg) : path.join(BASE_PROG_PATH, session.activeRepo);
-
-    // Sécurité basique pour ne pas remonter au-dessus du projet
-    if (!targetPath.startsWith(path.join(BASE_PROG_PATH, session.activeRepo))) {
-        return ctx.reply("⛔ Accès refusé (en dehors du repo).");
-    }
-
-    try {
-        const stats = await fs.stat(targetPath);
-
-        if (stats.isDirectory()) {
-            const dirents = await fs.readdir(targetPath, { withFileTypes: true });
-            dirents.sort((a, b) => {
-                if (a.isDirectory() && !b.isDirectory()) return -1;
-                if (!a.isDirectory() && b.isDirectory()) return 1;
-                return a.name.localeCompare(b.name);
-            });
-
-            // Ne garder que le contexte utile, limiter à 40 éléments
-            const MAX_ITEMS = 40;
-            const items = dirents.slice(0, MAX_ITEMS).map(d => {
-                const icon = d.isDirectory() ? '📁' : '📄';
-                return `${icon} \`${d.name}\``;
-            });
-
-            if (dirents.length > MAX_ITEMS) {
-                items.push(`\n... et ${dirents.length - MAX_ITEMS} autres éléments.`);
-            }
-
-            const title = arg ? `📂 ${session.activeRepo}/${arg}` : `📂 ${session.activeRepo} (Racine)`;
-            await ctx.reply(`${title}\n\n${items.join('\n') || '*Dossier vide*'}`, { parse_mode: 'Markdown' });
-
-        } else if (stats.isFile()) {
-            const content = await fs.readFile(targetPath, 'utf8');
-            let preview = content;
-            if (content.length > 3900) {
-                preview = content.substring(0, 3900) + "\n\n...[FICHIER TRONQUÉ POUR TELEGRAM]";
-            }
-            // Utiliser une syntax markdown appropriée si on connait l'extension
-            const ext = path.extname(targetPath).substring(1) || 'text';
-            await ctx.reply(`📄 **${arg}**\n\n\`\`\`${ext}\n${preview}\n\`\`\``, { parse_mode: 'Markdown' });
-        }
-    } catch (err) {
-        await ctx.reply(`❌ Impossible d'accéder à \`${arg || '/'}\`.\n\n${err.message}`, { parse_mode: 'Markdown' });
-    }
-});
-
 // --- GESTION DES NOTES & PIPELINE HANDLER ---
 bot.on('text', async (ctx) => {
     const session = getSession(ctx.chat.id);
@@ -673,9 +616,6 @@ bot.on('text', async (ctx) => {
         const memoryContext = await queryMemory(BASE_PROG_PATH, prompt);
         let attempt = 1, success = false, errorMessage = null;
 
-        // The while loop is now effectively for the Architect phase only,
-        // as the rest of the pipeline is moved to the 'approve_plan' action.
-        // We keep 'attempt' for potential future Architect retries, though currently it's 1.
         while (attempt <= MAX_RETRIES + 1) {
             await sendEdit(`🧠 (Essai ${attempt}/${MAX_RETRIES + 1}) Réflexion...`);
 
@@ -687,101 +627,9 @@ bot.on('text', async (ctx) => {
             console.log(`[Pipeline] Architect used CLI: ${planResult.usedCli}`);
             console.log(`[Pipeline] Plan preview: ${plan?.slice(0, 200)}...`);
 
-            // Stockage de l'état pour la validation
-            pendingPlans[ctx.chat.id] = {
-                prompt,
-                plan,
-                planResult,
-                memoryContext,
-                agentOptions,
-                session,
-                targetPath,
-                statusMsgId: statusMsg.message_id
-            };
-
-            // Terminer proprement cette étape et libérer la session pour qu'elle puisse réagir au callback
-            session.isProcessing = false;
-            session.state = "awaiting_plan_approval";
-
-            // Afficher le plan et les boutons de validation
-            let previewPlanText = plan;
-            if (previewPlanText.length > 3500) {
-                previewPlanText = previewPlanText.substring(0, 3500) + "\n\n[...Plan tronqué pour Telegram...]";
-            }
-
-            await ctx.telegram.editMessageText(
-                ctx.chat.id,
-                statusMsg.message_id,
-                null,
-                `🏗️ **Plan de l'Architecte :**\n\n${previewPlanText}\n\n👉 *Accepter ce plan et lancer le développement ?*`,
-                {
-                    parse_mode: 'Markdown',
-                    ...Markup.inlineKeyboard([
-                        [Markup.button.callback('✅ Appliquer & Coder', 'approve_plan')],
-                        [Markup.button.callback('❌ Rejeter', 'reject_plan')]
-                    ])
-                }
-            );
-            return; // FIN DE LA PREMIÈRE PARTIE
-        }
-    } catch (e) {
-        console.error(e);
-
-        // AUTO-SAVE en cas d'erreur critique
-        await saveSessionSummary(BASE_PROG_PATH, {
-            repo: getSession(ctx.chat.id).activeRepo,
-            cli: 'auto',
-            model: 'auto',
-            prompt: text,
-            summary: 'Erreur critique',
-            filesCreated: [],
-            testResult: '',
-            success: false,
-            attempts: 0,
-            tags: ['auto-saved', 'error'],
-            notes: `Erreur: ${e.message}`
-        });
-
-        await ctx.reply(`💥 Erreur d'orchestration : ${e.message}`);
-    } finally {
-        if (getSession(ctx.chat.id).state !== "awaiting_plan_approval") {
-            getSession(ctx.chat.id).isProcessing = false;
-            getSession(ctx.chat.id).state = "idle";
-        }
-    }
-});
-
-// --- GESTION DE LA VALIDATION DU PLAN (PHASE 2) ---
-bot.action('approve_plan', async (ctx) => {
-    const chatId = ctx.chat.id;
-    const planState = pendingPlans[chatId];
-
-    if (!planState) {
-        return ctx.answerCbQuery("❌ Session expirée ou introuvable.", { show_alert: true });
-    }
-
-    const { prompt, plan, planResult, memoryContext, agentOptions, session, targetPath, statusMsgId } = planState;
-    delete pendingPlans[chatId]; // Purger après utilisation
-
-    session.isProcessing = true;
-    session.state = "processing_code";
-
-    const sendEdit = async (m) => {
-        try { await ctx.telegram.editMessageText(chatId, statusMsgId, null, m); } catch (e) { }
-    };
-
-    await ctx.answerCbQuery("✅ Plan approuvé, lancement du code !");
-
-    let finalCode = "", filesCreated = [], testResult = "", sessionSummary = "";
-    let attempt = 1, success = false, errorMessage = null;
-
-    try {
-        while (attempt <= MAX_RETRIES + 1) {
             // Utiliser le MÊME CLI pour Developer et TechLead
             agentOptions.preferredCli = planResult.usedCli;
             console.log(`[Pipeline] CLI utilisé: ${planResult.usedCli} (réutilisé pour Developer/TechLead)`);
-
-            await sendEdit(`💻 (Essai ${attempt}/${MAX_RETRIES + 1}) Développement du code...`);
 
             // Developer - réutilise le même CLI
             const devResult = await runDeveloperAgent(plan, memoryContext, errorMessage, agentOptions);
@@ -859,7 +707,6 @@ bot.action('approve_plan', async (ctx) => {
                 `⚡ **Résultat :**\n\`\`\`text\n${testOutput}\n\`\`\``,
                 { parse_mode: 'Markdown' }
             );
-            await sendEdit(`✅ Terminé !`);
         } else {
             // AUTO-SAVE même en cas d'échec
             await saveSessionSummary(BASE_PROG_PATH, {
@@ -877,7 +724,6 @@ bot.action('approve_plan', async (ctx) => {
             });
 
             await ctx.reply(`❌ Échec après ${MAX_RETRIES + 1} essais.\n\nErreur: ${errorMessage}`);
-            await sendEdit(`❌ Échec définitif.`);
         }
     } catch (e) {
         console.error(e);
@@ -892,38 +738,16 @@ bot.action('approve_plan', async (ctx) => {
             filesCreated: [],
             testResult: '',
             success: false,
-            attempts: attempt,
-            tags: ['auto-saved', 'failed-critical'],
-            notes: `Exception: ${e.message}`
+            attempts: 0,
+            tags: ['auto-saved', 'error'],
+            notes: `Erreur: ${e.message}`
         });
 
-        await ctx.reply(`💥 Erreur d'orchestration : ${e.message}`);
-        await sendEdit(`💥 Erreur.`);
+        await ctx.reply("💥 Erreur orchestrateur.");
     } finally {
+        // Reset: autoriser un nouveau traitement
         session.isProcessing = false;
-        session.state = "idle";
     }
-});
-
-bot.action('reject_plan', async (ctx) => {
-    const chatId = ctx.chat.id;
-    if (pendingPlans[chatId]) {
-        const { statusMsgId } = pendingPlans[chatId];
-        delete pendingPlans[chatId];
-        try {
-            await ctx.telegram.editMessageText(
-                chatId,
-                statusMsgId,
-                null,
-                "❌ *Plan rejeté par l'utilisateur.*",
-                { parse_mode: 'Markdown' }
-            );
-        } catch (e) { }
-    }
-    const session = getSession(chatId);
-    session.isProcessing = false;
-    session.state = "idle";
-    await ctx.answerCbQuery("❌ Plan annulé.");
 });
 
 // --- INIT ---

@@ -27,9 +27,10 @@ export async function runArchitectAgent(prompt, context, options = {}) {
 Ton rôle est d'analyser la demande de l'utilisateur et le contexte existant, puis de générer un plan d'action d'implémentation robuste et élégant.
 
 OBJECTIFS :
-1. Définir une architecture modulaire et scalable.
+1. Définir une architecture modulaire et scalable SI la demande est complexe.
 2. Identifier les composants impactés.
-3. Prévoir les étapes d'implémentation logicalment ordonnées.
+3. Prévoir les étapes d'implémentation logiquement ordonnées.
+4. RÈGLE D'OR (KISS) : Adapte la complexité à la demande. Si l'utilisateur demande un script très simple (ex: hello world), ne propose PAS d'architecture lourde. Fournis un plan minimaliste.
 
 NE GÉNÈRE PAS DE CODE. Fournis uniquement les étapes nécessaires sous forme de plan stratégique.
 
@@ -53,8 +54,9 @@ Ton rôle est d'écrire le code fonctionnel, propre et optimisé en suivant stri
 
 CONSIGNES :
 - Utilise les meilleures pratiques du langage concerné.
-- Inclus la gestion d'erreurs et des commentaires pertinents.
+- Inclus la gestion d'erreurs pertinents, mais ne sur-ingénie pas.
 - Assure-toi que le code est immédiatement exécutable.
+- RÈGLE D'OR (KISS) : Adapte ton code à la demande. Si la tâche est basique (ex: Hello World), écris le code le plus simple et direct possible. Ne rajoute PAS de JSDoc excessif ni de gestion d'erreur superflue. Va droit au but.
 
 CONTEXTE MÉMOIRE (QMD) :
 ${context}
@@ -83,21 +85,30 @@ export async function runTechLeadAgent(developerCode, options = {}) {
     const { defaultCli, defaultModel, preferredCli, disabledClis = [] } = options;
 
     const fullPrompt = `Tu es le Tech Lead et Garant de la Qualité.
-Ton rôle est de prendre le code du Développeur, d'en assurer la validité technique, et de le formater STRICTEMENT pour l'orchestrateur système.
+Ton rôle est de prendre le code du Développeur et de le formater STRICTEMENT pour l'orchestrateur système.
 
-CONSIGNES DE FORMATAGE (OBLIGATOIRE) :
-1. Formate chaque fichier avec ce marqueur précis :
-### FILE: chemin/vers/fichier.ext
-\`\`\`language
-// code complet
+⚠️ ATTENTION : NE PAS UTILISER LES OUTILS INTERNES (write_file, list_directory, etc.)
+⚠️ TU DOIS SEULEMENT RÉPONDRE AVEC DU TEXTE AU FORMAT ### FILE:
+
+RÈGLE ABSOLUE : TA RÉPONSE DOIT COMMENCER DIRECTEMENT PAR "### FILE:" SANS AUCUN TEXTE AVANT.
+
+FORMAT EXIGÉ (exemple) :
+### FILE: src/components/Button.js
+\`\`\`javascript
+// Le code complet du fichier ici
+export const Button = () => {...};
 \`\`\`
 
-2. Spécifie la commande de test finale tout à la fin :
-### RUN: commande_de_test
+### RUN: npm test
 
-IMPORTANT : Assure-toi qu'il n'y a AUCUN espace ou texte parasite entre le marqueur ### FILE: et le début du bloc de code (\`\`\`).
+INTERDIT :
+- AUCUNE introduction ("Voici le code...", "Je suis le Tech Lead...", etc.)
+- AUCUNE explication avant le code
+- AUCUN emoji ou titre avant "### FILE:"
+- AUCUN outil interne (write_file, edit_file, etc.) - JUSTE DU TEXTE !
+- AUCUNE écriture dans MEMORY/ ou d'autres dossiers
 
-ZÉRO TEXTE INTRODUCTIF. ZÉRO BLA-BLA. JUSTE LE FORMAT TECHNIQUE.
+SI TU AJOUTES DU TEXTE AVANT "### FILE:" OU SI TU UTILISES DES OUTILS, TOUT LE SYSTÈME PLANTE.
 
 CODE À TRAITER :
 ${developerCode}`;
