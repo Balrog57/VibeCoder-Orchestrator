@@ -11,7 +11,7 @@ import {
     loadSessionHistory,
     manualSave
 } from './utils/memory.js';
-import { runArchitectAgent, runDeveloperAgent, runTechLeadAgent, buildAgentConfig } from './utils/agents.js';
+import { runVibeAgent, buildAgentConfig } from './utils/agents.js';
 import { applyCodeToFiles, executeAndTest, autoCommitGit, listRepos, createNewRepo } from './utils/actions.js';
 import { scanAvailableClis, getAvailableModels } from './utils/cli-detector.js';
 import {
@@ -27,13 +27,11 @@ import {
 const MY_TELEGRAM_ID = parseInt(process.env.MY_TELEGRAM_ID, 10);
 const bot = new Telegraf(process.env.BOT_TOKEN, { handlerTimeout: Infinity });
 
-const MAX_RETRIES = 2;
 const BASE_PROG_PATH = process.env.BASE_PROG_PATH || "C:\\Users\\Marc\\Documents\\1G1R\\_Programmation";
 const REPO_PATH = process.cwd();
 
 // --- GESTION DES SESSIONS ---
 const sessions = {};
-const pendingPlans = {}; // Stockage temporaire des plans en attente de validation
 let AVAILABLE_CLIS = [];      // Sera peuplé dynamiquement
 let AVAILABLE_MODELS = {};    // { claude: [...], gemini: [...] }
 let FALLBACK_ORDER = [];      // Ordre de fallback dynamique
@@ -672,151 +670,26 @@ bot.on('text', async (ctx) => {
 
         const memoryContext = await queryMemory(BASE_PROG_PATH, prompt);
         let attempt = 1, success = false, errorMessage = null;
+        const MAX_ATTEMPTS = 3;
 
-        // The while loop is now effectively for the Architect phase only,
-        // as the rest of the pipeline is moved to the 'approve_plan' action.
-        // We keep 'attempt' for potential future Architect retries, though currently it's 1.
-        while (attempt <= MAX_RETRIES + 1) {
-            await sendEdit(`🧠 (Essai ${attempt}/${MAX_RETRIES + 1}) Réflexion...`);
+        while (attempt <= MAX_ATTEMPTS) {
+            await sendEdit(`🧠 (Essai ${attempt}/${MAX_ATTEMPTS}) Réflexion et génération du code...`);
 
-            // Architect - trouve le premier CLI qui marche
-            const planResult = await runArchitectAgent(prompt, memoryContext, agentOptions);
-            const plan = planResult.output;
+            const agentResult = await runVibeAgent(prompt, memoryContext, errorMessage, agentOptions);
+            const agentOutput = agentResult.output;
+            finalCode = agentOutput;
 
-            console.log(`[Pipeline] Architect output length: ${plan?.length || 0}`);
-            console.log(`[Pipeline] Architect used CLI: ${planResult.usedCli}`);
-            console.log(`[Pipeline] Plan preview: ${plan?.slice(0, 200)}...`);
+            console.log(`[Pipeline] Agent output length: ${agentOutput?.length || 0}`);
+            console.log(`[Pipeline] Agent used CLI: ${agentResult.usedCli}`);
 
-            // Stockage de l'état pour la validation
-            pendingPlans[ctx.chat.id] = {
-                prompt,
-                plan,
-                planResult,
-                memoryContext,
-                agentOptions,
-                session,
-                targetPath,
-                statusMsgId: statusMsg.message_id
-            };
-
-            // Terminer proprement cette étape et libérer la session pour qu'elle puisse réagir au callback
-            session.isProcessing = false;
-            session.state = "awaiting_plan_approval";
-
-            // Afficher le plan et les boutons de validation
-            let previewPlanText = plan;
-            if (previewPlanText.length > 3500) {
-                previewPlanText = previewPlanText.substring(0, 3500) + "\n\n[...Plan tronqué pour Telegram...]";
-            }
-
-            const messageText = `🏗️ **Plan de l'Architecte :**\n\n${previewPlanText}\n\n👉 *Accepter ce plan et lancer le développement ?*`;
-            const keyboardMarkup = Markup.inlineKeyboard([
-                [Markup.button.callback('✅ Appliquer & Coder', 'approve_plan')],
-                [Markup.button.callback('❌ Rejeter', 'reject_plan')]
-            ]);
-
-            try {
-                await ctx.telegram.editMessageText(
-                    ctx.chat.id,
-                    statusMsg.message_id,
-                    null,
-                    messageText,
-                    {
-                        parse_mode: 'Markdown',
-                        ...keyboardMarkup
-                    }
-                );
-            } catch (mdError) {
-                console.warn("[Telegram] Erreur de parsing Markdown, fallback en texte brut:", mdError.message);
-                await ctx.telegram.editMessageText(
-                    ctx.chat.id,
-                    statusMsg.message_id,
-                    null,
-                    messageText,
-                    keyboardMarkup
-                );
-            }
-            return; // FIN DE LA PREMIÈRE PARTIE
-        }
-    } catch (e) {
-        console.error(e);
-
-        // AUTO-SAVE en cas d'erreur critique
-        await saveSessionSummary(BASE_PROG_PATH, {
-            repo: getSession(ctx.chat.id).activeRepo,
-            cli: 'auto',
-            model: 'auto',
-            prompt: text,
-            summary: 'Erreur critique',
-            filesCreated: [],
-            testResult: '',
-            success: false,
-            attempts: 0,
-            tags: ['auto-saved', 'error'],
-            notes: `Erreur: ${e.message}`
-        });
-
-        await ctx.reply(`💥 Erreur d'orchestration : ${e.message}`);
-    } finally {
-        if (getSession(ctx.chat.id).state !== "awaiting_plan_approval") {
-            getSession(ctx.chat.id).isProcessing = false;
-            getSession(ctx.chat.id).state = "idle";
-        }
-    }
-});
-
-// --- GESTION DE LA VALIDATION DU PLAN (PHASE 2) ---
-bot.action('approve_plan', async (ctx) => {
-    const chatId = ctx.chat.id;
-    const planState = pendingPlans[chatId];
-
-    if (!planState) {
-        return ctx.answerCbQuery("❌ Session expirée ou introuvable.", { show_alert: true });
-    }
-
-    const { prompt, plan, planResult, memoryContext, agentOptions, session, targetPath, statusMsgId } = planState;
-    delete pendingPlans[chatId]; // Purger après utilisation
-
-    session.isProcessing = true;
-    session.state = "processing_code";
-
-    const sendEdit = async (m) => {
-        try { await ctx.telegram.editMessageText(chatId, statusMsgId, null, m); } catch (e) { }
-    };
-
-    await ctx.answerCbQuery("✅ Plan approuvé, lancement du code !");
-
-    let finalCode = "", filesCreated = [], testResult = "", sessionSummary = "";
-    let attempt = 1, success = false, errorMessage = null;
-
-    try {
-        while (attempt <= MAX_RETRIES + 1) {
-            // Utiliser le MÊME CLI pour Developer et TechLead
-            agentOptions.preferredCli = planResult.usedCli;
-            console.log(`[Pipeline] CLI utilisé: ${planResult.usedCli} (réutilisé pour Developer/TechLead)`);
-
-            await sendEdit(`💻 (Essai ${attempt}/${MAX_RETRIES + 1}) Développement du code...`);
-
-            // Developer - réutilise le même CLI
-            const devResult = await runDeveloperAgent(plan, memoryContext, errorMessage, agentOptions);
-            const devCode = devResult.output;
-
-            console.log(`[Pipeline] Developer output length: ${devCode?.length || 0}`);
-            console.log(`[Pipeline] Developer used CLI: ${devResult.usedCli}`);
-
-            // TechLead - réutilise le même CLI
-            const techResult = await runTechLeadAgent(devCode, agentOptions);
-            console.log(`[Pipeline] TechLead output length: ${techResult.output?.length || 0}`);
-            finalCode = techResult.output;
-
-            await sendEdit(`💾 (Essai ${attempt}/${MAX_RETRIES + 1}) Écriture...`);
+            await sendEdit(`💾 (Essai ${attempt}/${MAX_ATTEMPTS}) Écriture...`);
             filesCreated = await applyCodeToFiles(finalCode, targetPath);
             if (filesCreated.length === 0) {
-                errorMessage = "Format non respecté (### FILE:).";
-                attempt++; continue;
+                errorMessage = "Format non respecté (### FILE: ou ### PATCH:).";
+                attempt++; continue; // Retry
             }
 
-            await sendEdit(`⚡ (Essai ${attempt}/${MAX_RETRIES + 1}) Lancement des tests...`);
+            await sendEdit(`⚡ (Essai ${attempt}/${MAX_ATTEMPTS}) Lancement des tests...`);
 
             let logBuffer = "";
             let lastEditTime = 0;
@@ -825,15 +698,13 @@ bot.action('approve_plan', async (ctx) => {
                 if (out) logBuffer += out;
                 if (err) logBuffer += err;
 
-                // Garder les 1000 derniers caractères pour éviter la limite Telegram
                 if (logBuffer.length > 1000) {
                     logBuffer = logBuffer.substring(logBuffer.length - 1000);
                 }
 
                 if (now - lastEditTime > 1500) {
                     lastEditTime = now;
-                    // Ne pas utiliser await pour ne pas bloquer le stream
-                    sendEdit(`⚡ (Essai ${attempt}/${MAX_RETRIES + 1}) Tests en cours...\n\n\`\`\`text\n${logBuffer}\n\`\`\``).catch(() => { });
+                    sendEdit(`⚡ (Essai ${attempt}/${MAX_ATTEMPTS}) Tests en cours...\n\n\`\`\`text\n${logBuffer}\n\`\`\``).catch(() => { });
                 }
             };
 
@@ -849,7 +720,7 @@ bot.action('approve_plan', async (ctx) => {
         if (success) {
             await sendEdit(`🔄 Commit Git dans ${session.activeRepo}...`);
 
-            // Git commit optionnel (si le dossier est un repo Git)
+            // Git commit optionnel
             try {
                 await autoCommitGit(targetPath, "VibeCode: " + prompt.slice(0, 30));
             } catch (gitErr) {
@@ -875,13 +746,11 @@ bot.action('approve_plan', async (ctx) => {
                 console.log(`[Memory] Session auto-sauvegardée: ${saveResult.path}`);
             }
 
-            // Mettre à jour la session pour /save manuel
             session.lastPrompt = prompt;
             session.lastSummary = sessionSummary;
             session.lastFiles = filesCreated;
             session.lastTestResult = testResult;
 
-            // Message propre sans polluer le chat avec le code complet
             const filesList = filesCreated.length > 0
                 ? filesCreated.map(f => `• \`${f}\``).join('\n')
                 : 'Aucun';
@@ -910,18 +779,19 @@ bot.action('approve_plan', async (ctx) => {
                 notes: `Erreur: ${errorMessage}`
             });
 
-            await ctx.reply(`❌ Échec après ${MAX_RETRIES + 1} essais.\n\nErreur: ${errorMessage}`);
+            await ctx.reply(`❌ Échec après ${MAX_ATTEMPTS} essais.\n\nErreur: ${errorMessage}`);
             await sendEdit(`❌ Échec définitif.`);
         }
+
     } catch (e) {
         console.error(e);
 
         // AUTO-SAVE en cas d'erreur critique
         await saveSessionSummary(BASE_PROG_PATH, {
-            repo: session.activeRepo,
-            cli: agentOptions.defaultCli || 'auto',
-            model: agentOptions.defaultModel || 'auto',
-            prompt: prompt,
+            repo: getSession(ctx.chat.id).activeRepo,
+            cli: 'auto',
+            model: 'auto',
+            prompt: text,
             summary: 'Erreur critique',
             filesCreated: [],
             testResult: '',
@@ -937,27 +807,6 @@ bot.action('approve_plan', async (ctx) => {
         session.isProcessing = false;
         session.state = "idle";
     }
-});
-
-bot.action('reject_plan', async (ctx) => {
-    const chatId = ctx.chat.id;
-    if (pendingPlans[chatId]) {
-        const { statusMsgId } = pendingPlans[chatId];
-        delete pendingPlans[chatId];
-        try {
-            await ctx.telegram.editMessageText(
-                chatId,
-                statusMsgId,
-                null,
-                "❌ *Plan rejeté par l'utilisateur.*",
-                { parse_mode: 'Markdown' }
-            );
-        } catch (e) { }
-    }
-    const session = getSession(chatId);
-    session.isProcessing = false;
-    session.state = "idle";
-    await ctx.answerCbQuery("❌ Plan annulé.");
 });
 
 // --- INIT ---

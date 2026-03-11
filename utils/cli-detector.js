@@ -186,12 +186,7 @@ export async function buildAgentConfig() {
     const availableNames = available.map(c => c.name);
 
     const priorityByRole = {
-        // Claude/Gemini pour la réflexion et planification
-        architect: ['claude', 'gemini', 'qwen', 'codex', 'opencode'],
-        // Codex/Qwen pour le code rapide et économique
-        developer: ['codex', 'qwen', 'gemini', 'claude', 'opencode'],
-        // Qwen en premier pour le formatage (Gemini YOLO pose des problèmes)
-        techlead: ['qwen', 'claude', 'gemini', 'codex', 'opencode']
+        agent: ['qwen', 'claude', 'gemini', 'codex', 'opencode']
     };
 
     const buildRoleConfig = (role) => {
@@ -204,8 +199,6 @@ export async function buildAgentConfig() {
     };
 
     return {
-        architect: buildRoleConfig('architect'),
-        developer: buildRoleConfig('developer'),
-        techlead: buildRoleConfig('techlead')
+        agent: buildRoleConfig('agent')
     };
 }
