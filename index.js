@@ -30,6 +30,9 @@ const bot = new Telegraf(process.env.BOT_TOKEN, { handlerTimeout: Infinity });
 const BASE_PROG_PATH = process.env.BASE_PROG_PATH || "C:\\Users\\Marc\\Documents\\1G1R\\_Programmation";
 const REPO_PATH = process.cwd();
 
+// --- HELPER FORMATTING ---
+const escapeMd = (str) => str ? str.toString().replace(/[_*[\]()~`>#\+\-=|{}\.!]/g, '\\$&') : '';
+
 // --- GESTION DES SESSIONS ---
 const sessions = {};
 let AVAILABLE_CLIS = [];      // Sera peuplé dynamiquement
@@ -158,7 +161,7 @@ bot.action('nav:config', async ctx => {
 
 bot.action('nav:settings', async ctx => {
     const session = getSession(ctx.chat.id);
-    const text = `🎛 **Settings**\n\nProjet: ${session.activeRepo || 'Aucun'}\nCLI: ${session.defaultCli || 'Auto'}\nModel: ${session.defaultModel || 'Auto'}`;
+    const text = `🎛 **Settings**\n\nProjet: ${escapeMd(session.activeRepo) || 'Aucun'}\nCLI: ${session.defaultCli || 'Auto'}\nModel: ${session.defaultModel || 'Auto'}`;
     await ctx.editMessageText(text, {
         parse_mode: 'Markdown',
         ...createSettingsKeyboard(session)
@@ -540,9 +543,8 @@ bot.command('settings', async (ctx) => {
 
     await ctx.reply(
         `⚙️ **Paramètres de la session**\n\n` +
-        `📁 Projet: **${repo}**\n` +
-        `🔧 CLI: **${cli}**\n` +
-        `🤖 Modèle: **${model}**\n\n` +
+        `📁 Projet: **${escapeMd(repo)}**\n` +
+        `🤖 CLI: ${cli} | 🧠 Model: ${model}\n` +
         `💡 Utilisez les tuiles ou /cli et /model pour modifier.`,
         { parse_mode: 'Markdown', ...createMainMenuKeyboard(session) }
     );
@@ -632,7 +634,7 @@ bot.on('text', async (ctx) => {
         if (res.success) {
             session.activeRepo = text;
             session.state = "idle";
-            return ctx.reply(`🚀 Projet **${text}** prêt.`, { parse_mode: 'Markdown' });
+            return ctx.reply(`🚀 Projet **${escapeMd(text)}** prêt.`, { parse_mode: 'Markdown' });
         }
         return ctx.reply(`❌ Erreur: ${res.error}`);
     }
