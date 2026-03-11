@@ -5,7 +5,7 @@
 
 import { Markup } from 'telegraf';
 
-const escapeMd = (str) => str ? str.toString().replace(/[_*[\]()~`>#\+\-=|{}\.!]/g, '\\\\$&') : '';
+const escapeMd = (str) => str ? str.toString().replace(/([_*\[\]()~`>#\+\-=|{}\.!])/g, '\\$1') : '';
 
 /**
  * Menu Principal - Tuiles d'actions rapides

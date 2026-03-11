@@ -31,7 +31,7 @@ const BASE_PROG_PATH = process.env.BASE_PROG_PATH || "C:\\Users\\Marc\\Documents
 const REPO_PATH = process.cwd();
 
 // --- HELPER FORMATTING ---
-const escapeMd = (str) => str ? str.toString().replace(/[_*[\]()~`>#\+\-=|{}\.!]/g, '\\$&') : '';
+const escapeMd = (str) => str ? str.toString().replace(/([_*\[\]()~`>#\+\-=|{}\.!])/g, '\\$1') : '';
 
 // --- GESTION DES SESSIONS ---
 const sessions = {};
