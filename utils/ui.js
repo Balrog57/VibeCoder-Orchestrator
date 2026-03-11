@@ -5,6 +5,8 @@
 
 import { Markup } from 'telegraf';
 
+const escapeMd = (str) => str ? str.toString().replace(/[_*[\]()~`>#\+\-=|{}\.!]/g, '\\\\$&') : '';
+
 /**
  * Menu Principal - Tuiles d'actions rapides
  */
@@ -144,7 +146,7 @@ export function createConfirmKeyboard(confirmAction, cancelAction = 'nav:main') 
  */
 export const Messages = {
     main: (session) => {
-        const repoStatus = session.activeRepo ? `✅ ${session.activeRepo}` : '❌ Aucun';
+        const repoStatus = session.activeRepo ? `✅ ${escapeMd(session.activeRepo)}` : '❌ Aucun';
         const cliStatus = session.defaultCli || '⚡ Auto';
         const modelStatus = session.defaultModel || '⚡ Auto';
         
@@ -157,7 +159,7 @@ export const Messages = {
 💡 _Envoyez vos instructions naturellement ou utilisez les tuiles ci-dessous._`;
     },
     
-    repoSelected: (repoName) => `✅ **Projet activé:** ${repoName}\n\n💬 Que voulez-vous coder ?`,
+    repoSelected: (repoName) => `✅ **Projet activé:** ${escapeMd(repoName)}\n\n💬 Que voulez-vous coder ?`,
     
     codeSuccess: (filesCreated, testResult) => {
         let msg = `🎯 **Succès !**\n\n`;
