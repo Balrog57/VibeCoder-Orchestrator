@@ -5,7 +5,6 @@ node_modules/
 .env
 
 # AI tool configs
-.agents/
 .gemini/
 
 # AI tool generated
