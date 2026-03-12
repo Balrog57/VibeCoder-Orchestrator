@@ -1,15 +1,24 @@
+# Dependencies
+node_modules/
+
+# Environment
 .env
+
+# AI tool configs
 .agents/
 .gemini/
-tasks/
-node_modules/
-.DS_Store
-MEMORY/
-memory/
+
+# Database/Cache
 *.sqlite*
+memory/xdg-cache/
+
+# Logs
 *.log
-install/
-cache/
-bun.lockb
+
+# OS
+.DS_Store
+
+# Temp files
+tmp_*.js
 
 
