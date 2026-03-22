@@ -68,7 +68,7 @@ Veuillez corriger.
 
     const cliToUse = preferredCli || defaultCli;
     const result = await executeLimiter(fullPrompt, config.agent, { defaultCli: cliToUse, defaultModel, disabledClis });
-    return { output: result.output, usedCli: result.usedCli };
+    return { output: result.output, usedCli: result.usedCli, traces: result.traces || [] };
 }
 
 /**
@@ -77,6 +77,7 @@ Veuillez corriger.
 async function executeLimiter(prompt, configList, options = {}) {
     const { defaultCli = null, defaultModel = null, disabledClis = [] } = options;
     let lastError = null;
+    const traces = [];
 
     let agentsToTry = configList.filter(agent => !disabledClis.includes(agent.cmd));
 
@@ -93,6 +94,8 @@ async function executeLimiter(prompt, configList, options = {}) {
     }
 
     for (const agentConfig of agentsToTry) {
+        const start = Date.now();
+        let traceRecorded = false;
         try {
             console.log(`[Agent] Tentative avec ${agentConfig.cmd}...`);
 
@@ -117,19 +120,53 @@ async function executeLimiter(prompt, configList, options = {}) {
                 const errorDetail = result.stderr?.trim() || result.stdout?.trim() || "Aucune sortie";
                 console.warn(`[Agent] ${agentConfig.cmd} échec. Exit: ${result.exitCode}. Signal: ${result.signal}`);
                 if (result.timedOut) console.warn(`[Agent] ${agentConfig.cmd} a expiré (timeout).`);
+                const reason = result.timedOut ? 'timeout' : (result.exitCode !== 0 ? 'non_zero_exit' : 'empty_output');
+                traces.push({
+                    cli: agentConfig.cmd,
+                    status: 'failed',
+                    reason,
+                    durationMs: Date.now() - start,
+                    exitCode: result.exitCode,
+                    timedOut: Boolean(result.timedOut),
+                    message: errorDetail.slice(0, 500)
+                });
+                traceRecorded = true;
                 
                 throw new Error(`${agentConfig.cmd}: ${errorDetail.slice(0, 200)} (Exit: ${result.exitCode})`);
             }
 
             console.log(`[Agent] ${agentConfig.cmd} réussi. Output length: ${result.stdout.length}`);
-            return { output: result.stdout, usedCli: agentConfig.cmd };
+            traces.push({
+                cli: agentConfig.cmd,
+                status: 'success',
+                reason: 'ok',
+                durationMs: Date.now() - start,
+                exitCode: result.exitCode,
+                timedOut: false,
+                message: `Output length: ${result.stdout.length}`
+            });
+            traceRecorded = true;
+            return { output: result.stdout, usedCli: agentConfig.cmd, traces };
         } catch (error) {
             console.warn(`[Agent] Échec de ${agentConfig.cmd}: ${error.message}`);
+            if (!traceRecorded) {
+                traces.push({
+                    cli: agentConfig.cmd,
+                    status: 'failed',
+                    reason: 'exception',
+                    durationMs: Date.now() - start,
+                    exitCode: null,
+                    timedOut: false,
+                    message: error.message?.slice(0, 500) || 'Unknown error'
+                });
+            }
             lastError = error;
         }
     }
 
-    throw new Error(`Échec global. Dernier message: ${lastError?.message}`);
+    const globalError = new Error(`Échec global. Dernier message: ${lastError?.message}`);
+    globalError.traces = traces;
+    throw globalError;
 }
 
 export { buildAgentConfig };

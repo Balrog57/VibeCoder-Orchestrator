@@ -1,8 +1,8 @@
 :root {
     --bg-color: #fff0f5;
-    --primary-color: #ffb6c1;
-    --secondary-color: #ff69b4;
-    --text-color: #5d5d5d;
+    --primary-color: #f7b0c6;
+    --secondary-color: #9b005f;
+    --text-color: #2f2f2f;
     --white: #ffffff;
     --chat-bg: rgba(255, 255, 255, 0.8);
     --bubble-me: #ffc0cb;
@@ -186,7 +186,7 @@ body {
     background-color: #f8f8f8;
     padding: 5px 10px;
     border-radius: 10px;
-    color: #888;
+    color: #4a4a4a;
 }
 
 .messages {
@@ -262,7 +262,7 @@ body {
 .message.system {
     align-self: center;
     background-color: transparent;
-    color: #aaa;
+    color: #626262;
     font-size: 0.8em;
     font-style: italic;
     text-align: center;
@@ -306,6 +306,11 @@ body {
     transform: scale(0.95);
 }
 
+.tile-btn:focus-visible {
+    outline: 3px solid #ff1493;
+    outline-offset: 2px;
+}
+
 .input-area {
     padding: 20px;
     background-color: var(--white);
@@ -327,6 +332,10 @@ body {
     border-color: var(--primary-color);
 }
 
+#user-input:focus-visible {
+    outline: 3px solid rgba(255, 20, 147, 0.5);
+}
+
 #send-btn {
     background-color: var(--secondary-color);
     color: white;
@@ -339,7 +348,12 @@ body {
 }
 
 #send-btn:hover {
-    background-color: #ff1493;
+    background-color: #7e004c;
+}
+
+#send-btn:focus-visible {
+    outline: 3px solid #ff1493;
+    outline-offset: 2px;
 }
 
 /* Animations */
@@ -351,6 +365,13 @@ body {
 @keyframes blinking {
     0%, 90%, 100% { transform: scaleY(1); }
     95% { transform: scaleY(0.1); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .kawaii-cat,
+    .eye {
+        animation: none;
+    }
 }
 
 /* Scrollbar Styling */

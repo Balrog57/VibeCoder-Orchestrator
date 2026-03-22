@@ -2,6 +2,61 @@ import fs from 'fs/promises';
 import path from 'path';
 import { execa } from 'execa';
 
+function resolvePathInsideRepo(repoPath, relativeFilePath) {
+    if (!relativeFilePath || typeof relativeFilePath !== 'string') {
+        throw new Error('Chemin de fichier invalide.');
+    }
+
+    if (path.isAbsolute(relativeFilePath)) {
+        throw new Error(`Chemin absolu interdit: ${relativeFilePath}`);
+    }
+
+    const normalizedRepoPath = path.resolve(repoPath);
+    const absolutePath = path.resolve(normalizedRepoPath, relativeFilePath);
+    const relativeFromRepo = path.relative(normalizedRepoPath, absolutePath);
+
+    if (relativeFromRepo.startsWith('..') || path.isAbsolute(relativeFromRepo)) {
+        throw new Error(`Chemin hors dépôt interdit: ${relativeFilePath}`);
+    }
+
+    return absolutePath;
+}
+
+function parseCommandLine(commandToRun) {
+    const trimmed = commandToRun.trim();
+    if (!trimmed) {
+        throw new Error('Commande vide.');
+    }
+
+    // Refuse explicit shell chaining/redirection to avoid injection primitives.
+    if (/[|&;<>`]/.test(trimmed)) {
+        throw new Error('La commande contient des opérateurs shell interdits.');
+    }
+
+    const tokens = [];
+    const tokenRegex = /"([^"\\]*(?:\\.[^"\\]*)*)"|'([^'\\]*(?:\\.[^'\\]*)*)'|[^\s]+/g;
+    let match;
+
+    while ((match = tokenRegex.exec(trimmed)) !== null) {
+        const quotedDouble = match[1];
+        const quotedSingle = match[2];
+        if (quotedDouble !== undefined) {
+            tokens.push(quotedDouble.replace(/\\(["\\])/g, '$1'));
+        } else if (quotedSingle !== undefined) {
+            tokens.push(quotedSingle.replace(/\\(['\\])/g, '$1'));
+        } else {
+            tokens.push(match[0]);
+        }
+    }
+
+    if (tokens.length === 0) {
+        throw new Error('Impossible de parser la commande.');
+    }
+
+    const [cmd, ...args] = tokens;
+    return { cmd, args };
+}
+
 /**
  * Parcourt le texte généré par l'IA et extrait les blocs de code pour les écrire sur le disque.
  * Format attendu :
@@ -103,7 +158,7 @@ export async function applyCodeToFiles(llmOutput, repoPath) {
             fileName = fileName || 'generated-code.js';
 
             // Écrire le premier bloc de code trouvé
-            const absolutePath = path.join(repoPath, fileName);
+            const absolutePath = resolvePathInsideRepo(repoPath, fileName);
             const dir = path.dirname(absolutePath);
 
             try {
@@ -118,7 +173,7 @@ export async function applyCodeToFiles(llmOutput, repoPath) {
 
         // Sauvegarder l'output problématique pour analyse si nécessaire
         try {
-            const debugFile = path.join(repoPath, 'debug-last-failed-output.txt');
+            const debugFile = resolvePathInsideRepo(repoPath, 'debug-last-failed-output.txt');
             await fs.writeFile(debugFile, llmOutput, 'utf-8');
             console.log(`[Actions] Output brut sauvegardé dans ${debugFile}`);
         } catch (e) { }
@@ -132,7 +187,7 @@ export async function applyCodeToFiles(llmOutput, repoPath) {
         console.log(`[Actions] Fichier trouvé: ${relativeFilePath} (${language || 'unknown'})`);
         console.log(`[Actions] Code length: ${codeContent.length}`);
 
-        const absolutePath = path.join(repoPath, relativeFilePath);
+        const absolutePath = resolvePathInsideRepo(repoPath, relativeFilePath);
         const dir = path.dirname(absolutePath);
 
         try {
@@ -156,7 +211,7 @@ export async function applyCodeToFiles(llmOutput, repoPath) {
         const newCode = match[3];
 
         console.log(`[Actions] Patch trouvé pour: ${relativeFilePath}`);
-        const absolutePath = path.join(repoPath, relativeFilePath);
+        const absolutePath = resolvePathInsideRepo(repoPath, relativeFilePath);
 
         try {
             const currentContent = await fs.readFile(absolutePath, 'utf-8');
@@ -195,15 +250,13 @@ export async function executeAndTest(llmOutput, repoPath, onProgress = null) {
     console.log(`[Actions] Exécution de la commande de test : ${commandToRun}`);
 
     try {
-        // Exécuter la commande dans le répertoire repoPath, avec un timeout de 15 secondes
-        // On split la commande et ses arguments de manière sécurisée (simplifiée ici)
-        const args = commandToRun.split(' ');
-        const cmd = args.shift();
+        // Exécuter la commande sans shell pour réduire le risque d'injection.
+        const { cmd, args } = parseCommandLine(commandToRun);
 
         const child = execa(cmd, args, {
             cwd: repoPath,
             timeout: 15000,
-            shell: true // Toléré ici pour certains scripts, mais attention aux injections si variables non contrôlées
+            shell: false
         });
 
         if (onProgress) {

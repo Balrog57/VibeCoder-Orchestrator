@@ -1,7 +1,8 @@
 <!DOCTYPE html>
-<html>
+<html lang="fr">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>VibeRemote</title>
     <link rel="stylesheet" href="style.css">
     <script src="../node_modules/marked/marked.min.js"></script>
@@ -21,27 +22,27 @@
                     <div class="mouth"></div>
                 </div>
             </div>
-            <div class="status-bubble" id="status-text">Prêt à coder !</div>
+            <div class="status-bubble" id="status-text" role="status" aria-live="polite">Prêt à coder !</div>
         </div>
 
         <!-- Chat Section -->
-        <div class="chat-container">
-            <div class="chat-header">
-                <h2>VibeRemote Chat</h2>
-                <div id="active-repo">📂 Aucun projet</div>
+            <div class="chat-container">
+                <div class="chat-header">
+                <h2 id="chat-title">VibeRemote Chat</h2>
+                <div id="active-repo" role="status" aria-live="polite">📂 Aucun projet</div>
             </div>
-            <div class="messages" id="messages-list">
-                <div class="message system">
+            <div class="messages" id="messages-list" role="log" aria-live="polite" aria-label="Conversation">
+                <div class="message system" id="system-welcome">
                     Bienvenue ! Sélectionnez un projet sur Telegram ou via les tuiles ci-dessous.
                 </div>
             </div>
             
             <!-- Tiles Container -->
-            <div id="tiles-container" class="tiles-grid"></div>
+            <div id="tiles-container" class="tiles-grid" role="group" aria-label="Quick actions"></div>
 
             <div class="input-area">
-                <input type="text" id="user-input" placeholder="Décrivez votre idée..." autofocus>
-                <button id="send-btn">Envoyer</button>
+                <input type="text" id="user-input" placeholder="Décrivez votre idée..." aria-label="Prompt input" autofocus>
+                <button id="send-btn" type="button" aria-label="Send message">Envoyer</button>
             </div>
         </div>
     </div>

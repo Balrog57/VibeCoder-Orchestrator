@@ -4,6 +4,50 @@ const sendBtn = document.getElementById('send-btn');
 const activeRepo = document.getElementById('active-repo');
 const statusText = document.getElementById('status-text');
 const tilesContainer = document.getElementById('tiles-container');
+const initialSystemMessage = document.getElementById('system-welcome');
+const chatTitle = document.getElementById('chat-title');
+
+let currentLocale = 'fr';
+
+const I18N = {
+    fr: {
+        noProject: '📂 Aucun projet',
+        ready: 'Pret a coder !',
+        welcome: 'Bienvenue ! Selectionnez un projet sur Telegram ou via les tuiles ci-dessous.',
+        chatTitle: 'VibeRemote Chat',
+        inputPlaceholder: 'Decrivez votre idee...',
+        send: 'Envoyer'
+    },
+    en: {
+        noProject: '📂 No active project',
+        ready: 'Ready to code!',
+        welcome: 'Welcome! Select a project from Telegram or with the tiles below.',
+        chatTitle: 'VibeRemote Chat',
+        inputPlaceholder: 'Describe your idea...',
+        send: 'Send'
+    }
+};
+
+function tr(key) {
+    const dict = I18N[currentLocale] || I18N.fr;
+    return dict[key] || key;
+}
+
+function applyLocale() {
+    document.documentElement.lang = currentLocale;
+    if (!activeRepo.innerText || activeRepo.innerText.includes('Aucun') || activeRepo.innerText.includes('No active')) {
+        activeRepo.innerText = tr('noProject');
+    }
+    if (!statusText.innerText || statusText.innerText.includes('Pret') || statusText.innerText.includes('Prêt') || statusText.innerText.includes('Ready')) {
+        statusText.innerText = tr('ready');
+    }
+    if (initialSystemMessage) {
+        initialSystemMessage.innerText = tr('welcome');
+    }
+    if (chatTitle) chatTitle.innerText = tr('chatTitle');
+    if (userInput) userInput.placeholder = tr('inputPlaceholder');
+    if (sendBtn) sendBtn.innerText = tr('send');
+}
 
 function addMessage(text, type) {
     const div = document.createElement('div');
@@ -69,9 +113,20 @@ window.electronAPI.onTilesUpdate((data) => {
 
 // Listen for session updates (e.g., active repo change)
 window.electronAPI.onSessionUpdate((data) => {
+    if (data.locale) {
+        currentLocale = (data.locale || 'fr').slice(0, 2).toLowerCase();
+        applyLocale();
+    }
     if (data.activeRepo) {
         activeRepo.innerText = `📂 ${data.activeRepo}`;
     } else {
-        activeRepo.innerText = `📂 Aucun projet`;
+        activeRepo.innerText = tr('noProject');
     }
 });
+
+window.electronAPI.onLocaleUpdate((data) => {
+    currentLocale = (data.locale || 'fr').slice(0, 2).toLowerCase();
+    applyLocale();
+});
+
+applyLocale();

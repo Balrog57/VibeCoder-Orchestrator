@@ -29,7 +29,15 @@ async function setup() {
 
         // 3. Création du fichier .env
         console.log("\n📝 Configuration du fichier .env...");
-        const envContent = `BOT_TOKEN=${botToken.trim()}\nMY_TELEGRAM_ID=${telegramId.trim()}\nBASE_PROG_PATH=${baseProgPath.trim().replace(/\\/g, '\\\\')}\n`;
+        const envContent = [
+            `BOT_TOKEN=${botToken.trim()}`,
+            `MY_TELEGRAM_ID=${telegramId.trim()}`,
+            `BASE_PROG_PATH=${baseProgPath.trim().replace(/\\/g, '\\\\')}`,
+            `DEFAULT_LOCALE=fr`,
+            `MEMORY_VECTOR_BACKEND=json`,
+            `MEMORY_EMBED_MODEL=hash-v1`,
+            `MEMORY_VECTOR_DIM=256`
+        ].join('\n') + '\n';
         await fs.writeFile('.env', envContent, 'utf8');
 
         // 4. Installation des dépendances
