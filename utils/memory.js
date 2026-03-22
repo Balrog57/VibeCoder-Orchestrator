@@ -36,6 +36,8 @@ export async function initMemory(basePath) {
 // Initialiser QMD dans le répertoire de mémoire
 async function initQMD(basePath) {
     const memoryPath = path.join(basePath, 'MEMORY');
+    const qmdPath = path.join(process.cwd(), 'libs', 'qmd', 'dist', 'cli', 'qmd.js');
+    
     const env = {
         ...process.env,
         XDG_CONFIG_HOME: path.join(memoryPath, 'xdg-config'),
@@ -44,22 +46,23 @@ async function initQMD(basePath) {
     
     try {
         // QMD s'initialise automatiquement au premier usage
-        // On vérifie juste qu'il est disponible
-        await execa('bunx', ['--bun', 'qmd', '--version'], {
+        // On utilise Bun car il inclut nativement fts5 requis par QMD sur Windows
+        await execa('bun', [qmdPath, '--version'], {
             cwd: basePath,
             env,
-            timeout: 5000,
-            shell: process.platform === 'win32'
+            timeout: 5000
         });
-        console.log('[Memory] QMD disponible');
+        console.log('[Memory] QMD disponible via local libs');
     } catch (err) {
-        console.warn('[Memory] QMD non disponible - fallback texte uniquement');
+        console.warn('[Memory] QMD non disponible - fallback texte uniquement', err.message);
     }
 }
 
 // Interroger la mémoire locale via QMD
 export async function queryMemory(basePath, prompt) {
     const memoryPath = path.join(basePath, 'MEMORY');
+    const qmdPath = path.join(process.cwd(), 'libs', 'qmd', 'dist', 'cli', 'qmd.js');
+    
     const env = {
         ...process.env,
         XDG_CONFIG_HOME: path.join(memoryPath, 'xdg-config'),
@@ -70,11 +73,10 @@ export async function queryMemory(basePath, prompt) {
     try {
         console.log(`[Memory] Query QMD: "${prompt.slice(0, 50)}..."`);
         
-        const { stdout } = await execa('bunx', ['--bun', 'qmd', 'query', prompt], {
+        const { stdout } = await execa('bun', [qmdPath, 'query', prompt, '--cwd', 'MEMORY'], {
             cwd: basePath,
             env,
-            timeout: 12000, // 12s timeout
-            shell: process.platform === 'win32',
+            timeout: 20000, // 20s timeout (re-ranker can be slow)
             reject: false
         });
         
@@ -212,6 +214,8 @@ export async function appendToDailyLog(basePath, sessionName, event) {
 // Indexer un fichier avec QMD
 async function indexWithQMD(basePath, filePath) {
     const memoryPath = path.join(basePath, 'MEMORY');
+    const qmdPath = path.join(process.cwd(), 'libs', 'qmd', 'dist', 'cli', 'qmd.js');
+    
     const env = {
         ...process.env,
         XDG_CONFIG_HOME: path.join(memoryPath, 'xdg-config'),
@@ -221,11 +225,10 @@ async function indexWithQMD(basePath, filePath) {
     try {
         // QMD indexe automatiquement les fichiers Markdown dans le répertoire MEMORY
         // On force un reindex si nécessaire
-        await execa('bunx', ['--bun', 'qmd', 'index'], {
+        await execa('bun', [qmdPath, 'index'], {
             cwd: basePath,
             env,
-            timeout: 10000,
-            shell: process.platform === 'win32',
+            timeout: 15000,
             reject: false
         });
         console.log('[Memory] QMD index mis à jour');

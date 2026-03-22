@@ -1,4 +1,4 @@
-# VibeCoder Orchestrator
+# VibeRemote
 
 **Version:** 2.5
 **Description:** Assistant de code multi-agents autonome fonctionnant via Telegram, permettant de gérer et de développer des projets locaux de manière assistée.
@@ -7,7 +7,7 @@
 
 ## Fonctionnalités Principales
 
-VibeCoder Orchestrator repose sur un pipeline d'agents IA spécialisés, avec une gestion dynamique des CLI et un système de mémoire hybride.
+VibeRemote repose sur un pipeline d'agents IA spécialisés, avec une gestion dynamique des CLI et un système de mémoire hybride.
 
 ### 1. Architecture Multi-Agents (`utils/agents.js`)
 - **Architecte :** Analyse la demande et génère un plan d'action structuré.
@@ -63,4 +63,4 @@ L'orchestrateur est contrôlé intégralement via un bot Telegram avec claviers 
 - `dotenv`
 
 ---
-*Ce README a été généré automatiquement dans le cadre de la vérification et du nettoyage du projet VibeCoder.*
+*Ce README a été généré automatiquement dans le cadre de la vérification et du nettoyage du projet VibeRemote.*

@@ -220,16 +220,26 @@ export async function executeAndTest(llmOutput, repoPath, onProgress = null) {
 }
 
 /**
- * Effectue un commit Git si les modifications sont approuvées
+ * Effectue un commit Git si les modifications sont approuvées.
+ * Initialise le dépôt si nécessaire.
  */
 export async function autoCommitGit(repoPath, message) {
     console.log(`[Actions] Création d'un commit Git...`);
     try {
+        // Vérifier si .git existe
+        const gitPath = path.join(repoPath, '.git');
+        try {
+            await fs.access(gitPath);
+        } catch (e) {
+            console.log(`[Actions] Initialisation d'un nouveau dépôt Git dans ${repoPath}...`);
+            await execa('git', ['init'], { cwd: repoPath });
+        }
+
         // Ajout de tous les fichiers modifiés/créés
         await execa('git', ['add', '.'], { cwd: repoPath });
 
         // Commit automatique
-        await execa('git', ['commit', '-m', `VibeCoder: ${message}`], { cwd: repoPath });
+        await execa('git', ['commit', '-m', message], { cwd: repoPath });
         console.log(`[Actions] Commit Git effectué avec succès.`);
         return true;
     } catch (err) {

@@ -11,7 +11,7 @@ const rl = createInterface({
 const question = (query) => new Promise((resolve) => rl.question(query, resolve));
 
 async function setup() {
-    console.log("\n💎 --- VibeCoder Orchestrator: INSTALLATEUR --- 💎\n");
+    console.log("\n💎 --- VibeRemote: INSTALLATEUR --- 💎\n");
 
     try {
         // 1. Choix du dossier de code principal
@@ -85,7 +85,7 @@ async function setup() {
         console.log("\\n⚙️ Démarrage automatique Windows désactivé.");
 
         console.log("\n✅ INSTALLATION TERMINÉE AVEC SUCCÈS !");
-        console.log(`🚀 Lancez le bot avec : node index.js`);
+        console.log(`🚀 Lancez le bot avec : npm start`);
 
     } catch (err) {
         console.error("\n❌ ERREUR LORS DE L'INSTALLATION :", err.message);

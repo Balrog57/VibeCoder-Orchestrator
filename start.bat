@@ -1,6 +1,6 @@
 @echo off
-title VibeCoder Orchestrator
-echo Lancement de VibeCoder Orchestrator...
+title VibeRemote
+echo Lancement de VibeRemote...
 cd /d "%~dp0"
-node index.js
+npm start
 pause

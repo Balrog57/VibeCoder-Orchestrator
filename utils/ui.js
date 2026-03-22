@@ -150,7 +150,7 @@ export const Messages = {
         const cliStatus = session.defaultCli || '⚡ Auto';
         const modelStatus = session.defaultModel || '⚡ Auto';
         
-        return `🤖 **VibeCoder Orchestrator**
+        return `🤖 **VibeRemote**
 
 📁 **Projet:** ${repoStatus}
 ⚙️ **CLI:** ${cliStatus}
@@ -175,7 +175,7 @@ export const Messages = {
     
     codeError: (error, attempts) => `❌ **Échec après ${attempts} essais**\n\nErreur: ${error}`,
     
-    help: `📚 **Aide VibeCoder Orchestrator**
+    help: `📚 **Aide VibeRemote**
 
 💬 **Mode Conversationnel:**
 Envoyez simplement vos instructions naturellement :

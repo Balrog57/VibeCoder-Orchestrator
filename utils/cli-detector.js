@@ -12,9 +12,10 @@ const CLI_CONFIG = {
         modelsCmd: null,
         knownModels: ['sonnet', 'opus', 'haiku', 'claude-sonnet-4-6', 'claude-opus-4-1'],
         tier: 'premium',
-        inputMode: 'args',  // Arguments en ligne de commande
+        inputMode: 'args',
         promptFlag: '-p',
-        modelFlag: '-m',
+        modelFlag: '--model',
+        extraArgs: ['--dangerously-skip-permissions'],
         description: 'Meilleur en planification (payant)'
     },
     gemini: {
@@ -22,9 +23,10 @@ const CLI_CONFIG = {
         modelsCmd: null,
         knownModels: ['gemini-2.5-pro', 'gemini-2.0-flash', 'gemini-1.5-pro', 'gemini-2.5-flash'],
         tier: 'freemium',
-        inputMode: 'stdin',  // Prompt via stdin pour éviter les conflits
-        promptFlag: '--prompt',
+        inputMode: 'args',
+        promptFlag: '-p',
         modelFlag: '-m',
+        extraArgs: ['-y'],
         description: 'Meilleur en réflexion/UI (free tier)'
     },
     codex: {
@@ -42,9 +44,10 @@ const CLI_CONFIG = {
         modelsCmd: null,
         knownModels: ['qwen3.5', 'qwen3', 'qwen2.5-coder', 'qwen2.5-72b'],
         tier: 'freemium',
-        inputMode: 'stdin',  // Prompt via stdin pour éviter les conflits
+        inputMode: 'args',
         promptFlag: '-p',
         modelFlag: '-m',
+        extraArgs: ['-y'],
         description: 'Équilibré (gratuit + payant)'
     },
     opencode: {

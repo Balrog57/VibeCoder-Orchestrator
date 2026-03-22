@@ -1,9 +1,10 @@
 {
-  "name": "vibecoder-orchestrator",
+  "name": "viberemote",
   "version": "1.0.0",
   "description": "",
   "main": "index.js",
   "scripts": {
+    "start": "electron .",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
@@ -11,9 +12,14 @@
   "license": "ISC",
   "type": "module",
   "dependencies": {
-    "@tobilu/qmd": "https://github.com/tobi/qmd",
+    "@tobilu/qmd": "./libs/qmd",
     "dotenv": "^17.3.1",
     "execa": "^9.6.1",
+    "marked": "^17.0.5",
+    "punycode": "^2.3.1",
     "telegraf": "^4.16.3"
+  },
+  "devDependencies": {
+    "electron": "^41.0.3"
   }
 }

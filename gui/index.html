@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>VibeRemote</title>
+    <link rel="stylesheet" href="style.css">
+    <script src="../node_modules/marked/marked.min.js"></script>
+</head>
+<body>
+    <div id="app">
+        <!-- Avatar Section -->
+        <div class="avatar-container">
+            <div class="kawaii-cat" id="avatar">
+                <div class="ears"></div>
+                <div class="face">
+                    <div class="eyes">
+                        <div class="eye left"></div>
+                        <div class="eye right"></div>
+                    </div>
+                    <div class="blush"></div>
+                    <div class="mouth"></div>
+                </div>
+            </div>
+            <div class="status-bubble" id="status-text">Prêt à coder !</div>
+        </div>
+
+        <!-- Chat Section -->
+        <div class="chat-container">
+            <div class="chat-header">
+                <h2>VibeRemote Chat</h2>
+                <div id="active-repo">📂 Aucun projet</div>
+            </div>
+            <div class="messages" id="messages-list">
+                <div class="message system">
+                    Bienvenue ! Sélectionnez un projet sur Telegram ou via les tuiles ci-dessous.
+                </div>
+            </div>
+            
+            <!-- Tiles Container -->
+            <div id="tiles-container" class="tiles-grid"></div>
+
+            <div class="input-area">
+                <input type="text" id="user-input" placeholder="Décrivez votre idée..." autofocus>
+                <button id="send-btn">Envoyer</button>
+            </div>
+        </div>
+    </div>
+    <script src="renderer.js"></script>
+</body>
+</html>

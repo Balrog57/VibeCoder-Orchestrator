@@ -106,7 +106,7 @@ async function executeLimiter(prompt, configList, options = {}) {
                 input: input,
                 stdout: 'pipe',
                 stderr: 'pipe',
-                timeout: 90000, // 90s pour laisser le temps
+                timeout: 120000, // Augmenté à 120s
                 shell: process.platform === 'win32',
                 windowsHide: true,
                 reject: false,
@@ -114,8 +114,11 @@ async function executeLimiter(prompt, configList, options = {}) {
             });
 
             if (result.failed || result.exitCode !== 0 || !result.stdout.trim()) {
-                console.warn(`[Agent] ${agentConfig.cmd} sortie vide ou erreur. Exit: ${result.exitCode}`);
-                throw new Error(result.stderr || `Code de sortie: ${result.exitCode}`);
+                const errorDetail = result.stderr?.trim() || result.stdout?.trim() || "Aucune sortie";
+                console.warn(`[Agent] ${agentConfig.cmd} échec. Exit: ${result.exitCode}. Signal: ${result.signal}`);
+                if (result.timedOut) console.warn(`[Agent] ${agentConfig.cmd} a expiré (timeout).`);
+                
+                throw new Error(`${agentConfig.cmd}: ${errorDetail.slice(0, 200)} (Exit: ${result.exitCode})`);
             }
 
             console.log(`[Agent] ${agentConfig.cmd} réussi. Output length: ${result.stdout.length}`);
