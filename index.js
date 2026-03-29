@@ -264,6 +264,15 @@ function createBackKeyboard(locale, target = 'nav:main') {
     return Markup.inlineKeyboard([[Markup.button.callback(t(locale, 'menu_back'), target)]]);
 }
 
+function createRunsKeyboard(locale, session) {
+    const buttons = [];
+    if (session?.lastPrompt) {
+        buttons.push(Markup.button.callback(t(locale, 'menu_rerun'), 'action:rerun_last'));
+    }
+    buttons.push(Markup.button.callback(t(locale, 'menu_back'), 'nav:main'));
+    return Markup.inlineKeyboard([buttons]);
+}
+
 function createTelegramReplyContext(ctx, action = 'remote:text') {
     return {
         ...ctx,
@@ -319,6 +328,8 @@ function describeDispatch(locale, dispatch) {
             return t(locale, 'dispatch_intent_help');
         case 'show_runs':
             return t(locale, 'dispatch_intent_runs');
+        case 'rerun_last':
+            return t(locale, 'dispatch_intent_rerun');
         case 'show_memory':
             return t(locale, 'menu_memory');
         case 'show_history':
@@ -424,6 +435,7 @@ async function buildRunsOverview(chatId) {
 
     const lines = session.runHistory.slice(0, 5).map((run, index) => {
         const status = run.success ? 'OK' : 'FAIL';
+        const promptSnippet = escapeMd((run.promptSnippet || '').slice(0, 72));
         const parts = [
             `${index + 1}. ${status}`,
             run.cli || t(locale, 'status_auto'),
@@ -433,10 +445,30 @@ async function buildRunsOverview(chatId) {
         if (run.attempts) {
             parts.push(`${run.attempts}x`);
         }
-        return parts.join(' | ');
+        let line = parts.join(' | ');
+        if (promptSnippet) {
+            line += `\n   ${promptSnippet}`;
+        }
+        if (!run.success && run.detail) {
+            line += `\n   ${escapeMd(run.detail.slice(0, 120))}`;
+        }
+        return line;
     });
 
     return `${t(locale, 'runs_title', { repo: escapeMd(session.activeRepo || t(locale, 'status_repo_none')) })}\n\n${lines.join('\n')}`;
+}
+
+async function rerunLastRequest(chatId, feedback) {
+    const session = getSession(chatId);
+    const locale = session.locale || 'fr';
+
+    if (!session.lastPrompt) {
+        await feedback.reply(t(locale, 'rerun_none'));
+        return;
+    }
+
+    await feedback.reply(t(locale, 'rerun_started'));
+    return processPipelineRequest(chatId, session.lastPrompt, feedback);
 }
 
 async function handleDispatchedCommand(chatId, dispatch, { source, feedback, uiContext }) {
@@ -511,10 +543,13 @@ async function handleDispatchedCommand(chatId, dispatch, { source, feedback, uiC
 
             await uiContext.reply(await buildRunsOverview(chatId), {
                 parse_mode: 'Markdown',
-                ...createBackKeyboard(locale)
+                ...createRunsKeyboard(locale, session)
             });
             return true;
         }
+        case 'rerun_last':
+            await rerunLastRequest(chatId, feedback);
+            return true;
         case 'show_history': {
             if (!session.activeRepo) {
                 await feedback.reply(t(locale, 'no_project'));
@@ -942,7 +977,23 @@ bot.command('runs', async ctx => {
     if (!session.activeRepo) {
         return ctx.reply(t(locale, 'no_project'), { parse_mode: 'Markdown' });
     }
-    return ctx.reply(await buildRunsOverview(ctx.chat.id), { parse_mode: 'Markdown' });
+    return ctx.reply(await buildRunsOverview(ctx.chat.id), { parse_mode: 'Markdown', ...createRunsKeyboard(locale, session) });
+});
+
+bot.command('rerun', async ctx => {
+    const session = getSession(ctx.chat.id);
+    const locale = session.locale || 'fr';
+    const feedback = {
+        reply: async (m) => ctx.reply(m, { parse_mode: 'Markdown' }),
+        sendInitialStatus: async (m) => { await ctx.reply(m); },
+        sendUpdate: async (m) => { await ctx.reply(m); }
+    };
+
+    if (!session.activeRepo) {
+        return ctx.reply(t(locale, 'no_project'), { parse_mode: 'Markdown' });
+    }
+
+    return rerunLastRequest(ctx.chat.id, feedback);
 });
 
 bot.command('save', async ctx => {
@@ -1148,9 +1199,22 @@ bot.action('action:runs', async ctx => {
 
     await ctx.editMessageText(await buildRunsOverview(ctx.chat.id), {
         parse_mode: 'Markdown',
-        ...Markup.inlineKeyboard([[Markup.button.callback(t(locale, 'menu_back'), 'nav:main')]])
+        ...createRunsKeyboard(locale, session)
     });
-    broadcastMenu(ctx.chat.id, Markup.inlineKeyboard([[Markup.button.callback(t(locale, 'menu_back'), 'nav:main')]]));
+    broadcastMenu(ctx.chat.id, createRunsKeyboard(locale, session));
+});
+
+bot.action('action:rerun_last', async ctx => {
+    const session = getSession(ctx.chat.id);
+    const locale = session.locale || 'fr';
+    const feedback = {
+        reply: async (m) => ctx.reply(m, { parse_mode: 'Markdown' }),
+        sendInitialStatus: async (m) => { await ctx.reply(m); },
+        sendUpdate: async (m) => { await ctx.reply(m); }
+    };
+
+    await ctx.answerCbQuery(t(locale, 'menu_rerun'));
+    await rerunLastRequest(ctx.chat.id, feedback);
 });
 
 bot.action('action:memory', async ctx => {
@@ -1340,7 +1404,9 @@ async function processPipelineRequest(chatId, text, feedback) {
                 cli: usedCli,
                 attempts: attempt,
                 taskProfile: activeTaskProfile.id,
-                workspaceMode: workspace.mode
+                workspaceMode: workspace.mode,
+                promptSnippet: text,
+                detail: filesCreated.join(', ')
             }));
             try { await autoCommitGit(targetPath, "VibeCode: " + text.slice(0, 30)); } catch (e) {}
             await saveSessionSummary(BASE_PROG_PATH, {
@@ -1357,7 +1423,9 @@ async function processPipelineRequest(chatId, text, feedback) {
                 cli: usedCli,
                 attempts: Math.max(attempt - 1, 1),
                 taskProfile: activeTaskProfile.id,
-                workspaceMode: workspace.mode
+                workspaceMode: workspace.mode,
+                promptSnippet: text,
+                detail: testResult || errorMessage || 'Run failed'
             }));
             await feedback.reply(t(locale, 'run_failed', { max: MAX_ATTEMPTS }));
         }
@@ -1369,7 +1437,9 @@ async function processPipelineRequest(chatId, text, feedback) {
             cli: agentOptions.defaultCli || activeTaskProfile.preferredCli || 'auto',
             attempts: current.activeRun?.attempts || 0,
             taskProfile: activeTaskProfile.id,
-            workspaceMode: workspace.mode
+            workspaceMode: workspace.mode,
+            promptSnippet: text,
+            detail: e.message
         }));
         if (Array.isArray(e.traces)) {
             for (const trace of e.traces) {
@@ -1626,7 +1696,17 @@ ipcMain.on('gui-action', async (event, action) => {
             return;
         }
         notifyGUI('message-to-gui', { text: await buildRunsOverview(chatId) });
+        notifyGUI('tiles-update', { tiles: createRunsKeyboard(locale, session).reply_markup.inline_keyboard });
         return;
+    }
+    if (action === 'action:rerun_last') {
+        const locale = session.locale || 'fr';
+        const feedback = {
+            reply: async (m) => notifyGUI('message-to-gui', { text: m }),
+            sendInitialStatus: async (m) => notifyGUI('status-update', { text: m }),
+            sendUpdate: async (m) => notifyGUI('status-update', { text: m })
+        };
+        return rerunLastRequest(chatId, feedback);
     }
     if (action === 'action:memory') {
         const locale = session.locale || 'fr';

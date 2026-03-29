@@ -56,12 +56,15 @@ describe('session state helpers', () => {
             cli: 'claude',
             attempts: 2,
             taskProfile: 'fix',
-            workspaceMode: 'worktree'
+            workspaceMode: 'worktree',
+            promptSnippet: 'corrige le login',
+            detail: 'src/login.js'
         });
         expect(session.runHistory).toHaveLength(1);
         expect(session.runHistory[0]).toMatchObject({
             cli: 'claude',
-            taskProfile: 'fix'
+            taskProfile: 'fix',
+            promptSnippet: 'corrige le login'
         });
     });
 });

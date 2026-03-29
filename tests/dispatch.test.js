@@ -53,6 +53,12 @@ describe('resolveRemoteDispatch', () => {
         });
     });
 
+    it('detects rerun intent', () => {
+        expect(resolveRemoteDispatch('relance dernier run', baseOptions)).toEqual({
+            type: 'rerun_last'
+        });
+    });
+
     it('detects task profile switching without swallowing coding prompts', () => {
         expect(resolveRemoteDispatch('mode review', baseOptions)).toEqual({
             type: 'set_task_profile',

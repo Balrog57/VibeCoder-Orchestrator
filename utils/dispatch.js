@@ -164,6 +164,18 @@ function extractTaskProfile(text) {
     return match;
 }
 
+function wantsRerunLast(text) {
+    return matchCommand(text, [
+        'rerun',
+        'relance',
+        'relancer',
+        'relance dernier run',
+        'relancer dernier run',
+        'rerun last run',
+        'retry last run'
+    ]);
+}
+
 function wantsRefreshClis(text) {
     return hasAny(text, ['refresh cli', 'rafraichis cli', 'rafraichir cli', 'scan cli', 'rescan cli']);
 }
@@ -296,6 +308,10 @@ export function resolveRemoteDispatch(rawText, {
 
     if (matchCommand(text, ['runs', 'run', 'derniers runs', 'last runs', 'run status', 'tentatives'])) {
         return { type: 'show_runs' };
+    }
+
+    if (wantsRerunLast(text)) {
+        return { type: 'rerun_last' };
     }
 
     if (matchCommand(text, ['save', 'sauvegarde', 'sauver', 'enregistre session'])) {
