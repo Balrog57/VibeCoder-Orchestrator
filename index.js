@@ -46,6 +46,7 @@ import {
 } from './utils/session-state.js';
 import { getDefaultWorkspaceStatus, prepareSessionWorkspace } from './utils/workspace-sessions.js';
 import { getTaskProfile } from './utils/task-profiles.js';
+import { loadPersistedSessions, savePersistedSessions } from './utils/session-persistence.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -246,6 +247,7 @@ function syncGuiSession(chatId) {
 
     notifyGUI('session-update', payload);
     notifyGUI('locale-update', payload);
+    schedulePersistSessions();
 }
 
 function setGuiDispatchState(chatId, { mode = 'idle', source = 'remote', label = '' } = {}) {
@@ -273,6 +275,21 @@ function setGuiDispatchState(chatId, { mode = 'idle', source = 'remote', label =
     if (mode === 'idle') {
         notifyGUI('status-update', { text: t(locale, 'gui_ready') });
     }
+}
+
+function schedulePersistSessions() {
+    if (persistSessionsTimer) {
+        clearTimeout(persistSessionsTimer);
+    }
+
+    persistSessionsTimer = setTimeout(async () => {
+        persistSessionsTimer = null;
+        try {
+            await savePersistedSessions(REPO_PATH, sessions);
+        } catch (error) {
+            console.warn('[Sessions] Persist failed:', error.message);
+        }
+    }, 200);
 }
 
 async function pushRuntimeStatus(chatId, feedback, text) {
@@ -308,6 +325,7 @@ let FALLBACK_ORDER = [];      // Ordre de fallback dynamique
 let AVAILABLE_IDES = [];      // IDE détectés dynamiquement
 let IDE_FALLBACK_ORDER = [];  // Ordre de fallback des IDE
 const SESSION_SLOTS = ['main', 'research', 'verify'];
+let persistSessionsTimer = null;
 
 function normalizeSessionSlot(slot) {
     return SESSION_SLOTS.includes(slot) ? slot : 'main';
@@ -2392,6 +2410,7 @@ ipcMain.on('gui-action', async (event, action) => {
 // --- INIT ---
 async function init() {
     try {
+        Object.assign(sessions, await loadPersistedSessions(REPO_PATH));
         await initAvailableClis();
         await initAvailableIdes();
         await initMemory(BASE_PROG_PATH);
