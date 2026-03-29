@@ -575,7 +575,10 @@ async function rerunLastRequest(chatId, feedback, overrideCli = null) {
     } else {
         await feedback.reply(t(locale, 'rerun_started'));
     }
-    return processPipelineRequest(chatId, session.lastPrompt, feedback, { overrideCli });
+    return processPipelineRequest(chatId, session.lastPrompt, feedback, {
+        overrideCli,
+        strictCli: Boolean(overrideCli)
+    });
 }
 
 async function rerunRunRequest(chatId, runIndex, feedback, overrideCli = null) {
@@ -596,7 +599,10 @@ async function rerunRunRequest(chatId, runIndex, feedback, overrideCli = null) {
     } else {
         await feedback.reply(t(locale, 'rerun_run_started', { index: normalizedIndex + 1 }));
     }
-    return processPipelineRequest(chatId, run.prompt, feedback, { overrideCli });
+    return processPipelineRequest(chatId, run.prompt, feedback, {
+        overrideCli,
+        strictCli: Boolean(overrideCli)
+    });
 }
 
 function openIdeForRun(session, runIndex) {
@@ -1578,6 +1584,7 @@ async function processPipelineRequest(chatId, text, feedback, options = {}) {
     let session = getSession(chatId);
     const locale = session.locale || 'fr';
     const overrideCli = options.overrideCli || null;
+    const strictCli = Boolean(options.strictCli);
     if (session.isProcessing) {
         await feedback.reply(t(locale, 'already_processing'));
         return;
@@ -1593,7 +1600,8 @@ async function processPipelineRequest(chatId, text, feedback, options = {}) {
         disabledClis: overrideCli
             ? session.disabledClis.filter(cli => cli !== overrideCli)
             : session.disabledClis,
-        preferredCli: null
+        preferredCli: null,
+        strictCli
     };
     const activeTaskProfile = getTaskProfile(session.taskProfile);
 
@@ -1649,7 +1657,7 @@ async function processPipelineRequest(chatId, text, feedback, options = {}) {
                         await pushRuntimeStatus(
                             chatId,
                             feedback,
-                            t(locale, 'fallback_status_line', {
+                            t(locale, strictCli ? 'cli_failure_status_line' : 'fallback_status_line', {
                                 cli: trace.cli,
                                 reason: fallbackReasonLabel(locale, trace.reason)
                             })

@@ -74,11 +74,23 @@ export function assessExecutionResult(result) {
     };
 }
 
-export function buildCliExecutionPlan(configList, { defaultCli = null, disabledClis = [] } = {}) {
+export function buildCliExecutionPlan(configList, {
+    defaultCli = null,
+    disabledClis = [],
+    strictCli = false
+} = {}) {
     const filtered = configList.filter(agent => !disabledClis.includes(agent.cmd));
 
     if (!filtered.length) {
         return [];
+    }
+
+    if (strictCli) {
+        if (!defaultCli || disabledClis.includes(defaultCli)) {
+            return [];
+        }
+        const forced = filtered.find(agent => agent.cmd === defaultCli);
+        return forced ? [forced] : [];
     }
 
     if (defaultCli && !disabledClis.includes(defaultCli)) {

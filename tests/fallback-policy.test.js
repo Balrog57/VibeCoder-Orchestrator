@@ -19,6 +19,15 @@ describe('fallback policy', () => {
         expect(plan.map(item => item.cmd)).toEqual(['claude', 'qwen']);
     });
 
+    it('can lock execution to a single explicit CLI', () => {
+        const plan = buildCliExecutionPlan(
+            [{ cmd: 'qwen' }, { cmd: 'claude' }, { cmd: 'gemini' }],
+            { defaultCli: 'claude', strictCli: true }
+        );
+
+        expect(plan.map(item => item.cmd)).toEqual(['claude']);
+    });
+
     it('detects recoverable failure reasons', () => {
         expect(classifyFailureReason('socket hang up', 1, false)).toBe('network_error');
         expect(classifyFailureReason('spawn ENOENT', null, false)).toBe('cli_unavailable');

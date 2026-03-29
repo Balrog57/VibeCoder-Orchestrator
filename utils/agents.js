@@ -41,6 +41,7 @@ export async function runVibeAgent(prompt, context, errorMessage = null, options
         defaultModel,
         preferredCli,
         disabledClis = [],
+        strictCli = false,
         cwd = process.cwd(),
         taskProfile = 'code'
     } = options;
@@ -57,6 +58,7 @@ export async function runVibeAgent(prompt, context, errorMessage = null, options
         defaultCli: cliToUse,
         defaultModel,
         disabledClis,
+        strictCli,
         cwd
     });
     return { output: result.output, usedCli: result.usedCli, traces: result.traces || [] };
@@ -124,11 +126,17 @@ Veuillez corriger.
  * Execute l'appel CLI avec fallback.
  */
 async function executeLimiter(prompt, configList, options = {}) {
-    const { defaultCli = null, defaultModel = null, disabledClis = [], cwd = process.cwd() } = options;
+    const {
+        defaultCli = null,
+        defaultModel = null,
+        disabledClis = [],
+        strictCli = false,
+        cwd = process.cwd()
+    } = options;
     let lastError = null;
     const traces = [];
 
-    const agentsToTry = buildCliExecutionPlan(configList, { defaultCli, disabledClis });
+    const agentsToTry = buildCliExecutionPlan(configList, { defaultCli, disabledClis, strictCli });
 
     if (agentsToTry.length === 0) {
         throw new Error('Aucun CLI disponible (tous desactives).');
