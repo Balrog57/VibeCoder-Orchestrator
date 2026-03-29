@@ -48,6 +48,7 @@ const DEFAULT_STATE = Object.freeze({
     fallbackCount: 0,
     activeRun: null,
     runHistory: [],
+    remoteEventHistory: [],
     locale: 'fr'
 });
 
@@ -87,6 +88,7 @@ export function ensureSessionState(session = {}) {
         : 3;
     merged.lastFiles = Array.isArray(merged.lastFiles) ? [...merged.lastFiles] : [];
     merged.runHistory = Array.isArray(merged.runHistory) ? [...merged.runHistory] : [];
+    merged.remoteEventHistory = Array.isArray(merged.remoteEventHistory) ? [...merged.remoteEventHistory] : [];
     merged.permissionHistory = Array.isArray(merged.permissionHistory) ? [...merged.permissionHistory] : [];
     merged.activeRun = merged.activeRun ? { ...merged.activeRun } : null;
     merged.pendingPermission = merged.pendingPermission ? { ...merged.pendingPermission } : null;
@@ -174,5 +176,23 @@ export function appendRunHistory(session, runEntry) {
     }
 
     nextSession.runHistory = [entry, ...nextSession.runHistory].slice(0, 10);
+    return nextSession;
+}
+
+export function appendSessionEvent(session, eventEntry) {
+    const nextSession = ensureSessionState(session);
+    const entry = eventEntry ? { ...eventEntry } : null;
+    if (!entry) {
+        return nextSession;
+    }
+
+    nextSession.remoteEventHistory = [
+        {
+            createdAt: new Date().toISOString(),
+            ...entry
+        },
+        ...nextSession.remoteEventHistory
+    ].slice(0, 20);
+
     return nextSession;
 }

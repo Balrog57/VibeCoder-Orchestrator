@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
     appendRunHistory,
+    appendSessionEvent,
     createSessionState,
     ensureSessionState,
     finishSessionRun,
@@ -74,6 +75,18 @@ describe('session state helpers', () => {
             executionMode: 'cli_default',
             taskProfile: 'fix',
             promptSnippet: 'corrige le login'
+        });
+
+        session = appendSessionEvent(session, {
+            type: 'dispatch_local',
+            source: 'telegram',
+            label: 'Sessions'
+        });
+        expect(session.remoteEventHistory).toHaveLength(1);
+        expect(session.remoteEventHistory[0]).toMatchObject({
+            type: 'dispatch_local',
+            source: 'telegram',
+            label: 'Sessions'
         });
     });
 });

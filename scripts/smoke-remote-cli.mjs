@@ -143,6 +143,7 @@ async function main() {
 
     assert(mainActions.has('nav:repos') && mainActions.has('action:code'), 'main menu tiles missing expected actions');
     assert(mainActions.has('nav:sessions'), 'main menu tiles missing sessions action');
+    assert(mainActions.has('nav:events'), 'main menu tiles missing events action');
     assert(settingsActions.has('nav:workspace') && settingsActions.has('nav:profile'), 'settings tiles missing workspace/profile navigation');
     assert(settingsActions.has('nav:fallback'), 'settings tiles missing fallback navigation');
     assert(settingsActions.has('nav:permissions') && settingsActions.has('nav:service'), 'settings tiles missing permissions/service navigation');

@@ -530,6 +530,10 @@ export function resolveRemoteDispatch(rawText, {
         return { type: 'show_help' };
     }
 
+    if (matchCommand(text, ['events', 'event', 'audit', 'journal remote', 'remote events'])) {
+        return { type: 'show_events' };
+    }
+
     if (matchCommand(text, ['memory', 'memoire', 'rag', 'context', 'contexte'])) {
         return { type: 'show_memory' };
     }

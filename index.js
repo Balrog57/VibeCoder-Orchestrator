@@ -31,6 +31,7 @@ import {
     createWorkspaceModeKeyboard,
     createFallbackKeyboard,
     createPermissionKeyboard,
+    createEventsKeyboard,
     createServiceKeyboard,
     createSettingsKeyboard,
     Messages
@@ -44,7 +45,8 @@ import {
     startSessionRun,
     recordFallback,
     finishSessionRun,
-    appendRunHistory
+    appendRunHistory,
+    appendSessionEvent
 } from './utils/session-state.js';
 import { getDefaultWorkspaceStatus, prepareSessionWorkspace } from './utils/workspace-sessions.js';
 import { getTaskProfile } from './utils/task-profiles.js';
@@ -195,6 +197,10 @@ function withTargetSlotLabel(locale, label, slot, targeted = false) {
     }
 
     return `[${sessionSlotLabel(locale, slot)}] ${label}`;
+}
+
+function appendRemoteEvent(chatId, eventEntry) {
+    return updateSession(chatId, current => appendSessionEvent(current, eventEntry));
 }
 
 function executionModeLabel(locale, executionMode, requestedCli = null) {
@@ -584,6 +590,25 @@ function buildServiceStatusText(locale) {
     ].join('\n');
 }
 
+function buildRemoteEventsOverview(locale, session) {
+    if (!session.remoteEventHistory?.length) {
+        return `${t(locale, 'events_title', { slot: sessionSlotLabel(locale, session.sessionSlot) })}\n\n${t(locale, 'events_none')}`;
+    }
+
+    const lines = session.remoteEventHistory.slice(0, 10).map((entry, index) => {
+        const typeLabel = t(locale, `event_type_${entry.type || 'incoming_text'}`);
+        const sourceLabel = t(locale, entry.source === 'telegram'
+            ? 'dispatch_source_telegram'
+            : entry.source === 'gui'
+                ? 'dispatch_source_gui'
+                : 'dispatch_source_remote');
+        const detail = entry.label || entry.text || t(locale, 'gui_monitor_none');
+        return `${index + 1}. ${typeLabel} | ${sourceLabel} | ${detail}`;
+    });
+
+    return `${t(locale, 'events_title', { slot: sessionSlotLabel(locale, session.sessionSlot) })}\n\n${lines.join('\n')}`;
+}
+
 function createRunsKeyboard(locale, session) {
     const buttons = [];
     if (session?.lastPrompt) {
@@ -695,6 +720,8 @@ function describeDispatch(locale, dispatch) {
             return t(locale, 'dispatch_intent_language_menu');
         case 'show_help':
             return t(locale, 'dispatch_intent_help');
+        case 'show_events':
+            return t(locale, 'dispatch_intent_events');
         case 'show_runs':
             return t(locale, 'dispatch_intent_runs');
         case 'rerun_last':
@@ -830,6 +857,11 @@ async function maybeQueueRemotePermission(chatId, { action, payload = {}, source
         payload,
         source
     }));
+    appendRemoteEvent(chatId, {
+        type: 'permission_requested',
+        source,
+        label: buildPermissionActionLabel(nextSession.locale || 'fr', nextSession.pendingPermission)
+    });
     const locale = nextSession.locale || 'fr';
     const message = `${t(locale, 'permission_request_title')}\n\n${t(locale, 'permission_request_action')}: ${buildPermissionActionLabel(locale, nextSession.pendingPermission)}\n${t(locale, 'permission_request_source')}: ${t(locale, source === 'telegram' ? 'dispatch_source_telegram' : source === 'gui' ? 'dispatch_source_gui' : 'dispatch_source_remote')}\n${t(locale, 'permission_request_target')}: ${buildPermissionTargetLabel(locale, nextSession.pendingPermission)}`;
     const keyboard = createPermissionKeyboard(nextSession);
@@ -859,6 +891,11 @@ async function resolvePendingPermission(chatId, approved, { feedback, uiContext 
 
     const pending = session.pendingPermission;
     updateSession(chatId, current => resolveRemotePermission(current, approved));
+    appendRemoteEvent(chatId, {
+        type: approved ? 'permission_approved' : 'permission_denied',
+        source: pending.source || 'remote',
+        label: buildPermissionActionLabel(locale, pending)
+    });
 
     if (!approved) {
         if (feedback?.reply) {
@@ -1183,6 +1220,12 @@ async function handleDispatchedCommand(chatId, dispatch, { source, feedback, uiC
                 ...createBackKeyboard(locale)
             });
             return true;
+        case 'show_events':
+            await uiContext.reply(buildRemoteEventsOverview(locale, session), {
+                parse_mode: 'Markdown',
+                ...createEventsKeyboard(locale)
+            });
+            return true;
         case 'show_memory': {
             if (!session.activeRepo) {
                 await feedback.reply(t(locale, 'no_project'));
@@ -1493,6 +1536,11 @@ async function routeIncomingText(chatId, text, { source, feedback, uiContext }) 
     const normalizedText = targetedInput?.text || text.trim();
     const targetSlot = targetedInput?.slot ? switchSessionSlot(chatId, targetedInput.slot).sessionSlot : getSession(chatId).sessionSlot;
     const locale = getSession(chatId).locale || 'fr';
+    appendRemoteEvent(chatId, {
+        type: 'incoming_text',
+        source,
+        text: withTargetSlotLabel(locale, normalizedText, targetSlot, Boolean(targetedInput))
+    });
 
     const dispatch = resolveRemoteDispatch(normalizedText, {
         repos: await listRepos(BASE_PROG_PATH),
@@ -1502,6 +1550,11 @@ async function routeIncomingText(chatId, text, { source, feedback, uiContext }) 
     });
 
     if (dispatch) {
+        appendRemoteEvent(chatId, {
+            type: 'dispatch_local',
+            source,
+            label: withTargetSlotLabel(locale, describeDispatch(locale, dispatch), targetSlot, Boolean(targetedInput))
+        });
         setGuiDispatchState(chatId, {
             mode: 'local',
             source,
@@ -1520,6 +1573,11 @@ async function routeIncomingText(chatId, text, { source, feedback, uiContext }) 
         mode: 'pipeline',
         source,
         label: withTargetSlotLabel(locale, normalizedText.slice(0, 80), targetSlot, Boolean(targetedInput))
+    });
+    appendRemoteEvent(chatId, {
+        type: 'pipeline_request',
+        source,
+        text: withTargetSlotLabel(locale, normalizedText.slice(0, 120), targetSlot, Boolean(targetedInput))
     });
 
     return processPipelineRequest(chatId, normalizedText, feedback);
@@ -1569,6 +1627,19 @@ async function initAvailableIdes() {
 // --- SÉCURITÉ ---
 bot.use(async (ctx, next) => {
     if (ctx.from && ctx.from.id !== MY_TELEGRAM_ID) return;
+    return next();
+});
+
+bot.on('callback_query', async (ctx, next) => {
+    const chatId = ctx.chat?.id;
+    const action = ctx.callbackQuery?.data;
+    if (chatId && action) {
+        appendRemoteEvent(chatId, {
+            type: 'dispatch_local',
+            source: 'telegram',
+            label: action
+        });
+    }
     return next();
 });
 
@@ -1659,6 +1730,16 @@ async function showPermissionsMenu(ctx) {
     const locale = session.locale || 'fr';
     const text = buildPermissionsOverview(locale, session);
     const keyboard = createPermissionKeyboard(session);
+    await ctx.editMessageText(text, { parse_mode: 'Markdown', ...keyboard });
+    broadcastMenu(ctx.chat.id, keyboard);
+}
+
+async function showEventsMenu(ctx) {
+    const session = getSession(ctx.chat.id);
+    syncGuiSession(ctx.chat.id);
+    const locale = session.locale || 'fr';
+    const text = buildRemoteEventsOverview(locale, session);
+    const keyboard = createEventsKeyboard(locale);
     await ctx.editMessageText(text, { parse_mode: 'Markdown', ...keyboard });
     broadcastMenu(ctx.chat.id, keyboard);
 }
@@ -1776,6 +1857,15 @@ bot.command('permissions', async ctx => {
         editMessageText: async (text, extra) => ctx.reply(text, extra)
     };
     await showPermissionsMenu(mockCtx);
+});
+
+bot.command('events', async ctx => {
+    const mockCtx = {
+        ...ctx,
+        callbackQuery: { data: 'nav:events' },
+        editMessageText: async (text, extra) => ctx.reply(text, extra)
+    };
+    await showEventsMenu(mockCtx);
 });
 
 bot.command('session', async ctx => {
@@ -1958,6 +2048,7 @@ bot.action('nav:settings', showSettingsMenu);
 bot.action('nav:sessions', showSessionMenu);
 bot.action('nav:workspace', showWorkspaceModeMenu);
 bot.action('nav:permissions', showPermissionsMenu);
+bot.action('nav:events', showEventsMenu);
 bot.action('nav:fallback', showFallbackMenu);
 bot.action('nav:service', showServiceMenu);
 bot.action('nav:profile', showTaskProfileMenu);
@@ -2686,6 +2777,11 @@ ipcMain.on('gui-action', async (event, action) => {
     const chatId = MY_TELEGRAM_ID;
     let session = getSession(chatId);
     const mockCtx = createGuiMockContext(chatId, action);
+    appendRemoteEvent(chatId, {
+        type: 'dispatch_local',
+        source: 'gui',
+        label: action
+    });
 
     if (action === 'nav:main') return showMainMenu(mockCtx);
     if (action === 'nav:repos') {
@@ -2726,6 +2822,7 @@ ipcMain.on('gui-action', async (event, action) => {
     if (action === 'nav:sessions') return showSessionMenu(mockCtx);
     if (action === 'nav:workspace') return showWorkspaceModeMenu(mockCtx);
     if (action === 'nav:permissions') return showPermissionsMenu(mockCtx);
+    if (action === 'nav:events') return showEventsMenu(mockCtx);
     if (action === 'nav:fallback') return showFallbackMenu(mockCtx);
     if (action === 'nav:service') return showServiceMenu(mockCtx);
     if (action === 'nav:profile') return showTaskProfileMenu(mockCtx);

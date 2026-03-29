@@ -25,6 +25,7 @@ export function createMainMenuKeyboard(session) {
             Markup.button.callback(t(locale, 'menu_memory'), 'action:memory')
         ],
         [
+            Markup.button.callback(t(locale, 'menu_events'), 'nav:events'),
             Markup.button.callback(t(locale, 'menu_sessions'), 'nav:sessions'),
             Markup.button.callback(t(locale, 'menu_settings'), 'nav:settings'),
             Markup.button.callback(t(locale, 'menu_help'), 'action:help')
@@ -211,6 +212,13 @@ export function createServiceKeyboard(locale = 'fr') {
     return Markup.inlineKeyboard([
         [Markup.button.callback(t(locale, 'menu_refresh'), 'nav:service')],
         [Markup.button.callback(t(locale, 'menu_back'), 'nav:settings')]
+    ]);
+}
+
+export function createEventsKeyboard(locale = 'fr') {
+    return Markup.inlineKeyboard([
+        [Markup.button.callback(t(locale, 'menu_refresh'), 'nav:events')],
+        [Markup.button.callback(t(locale, 'menu_back'), 'nav:main')]
     ]);
 }
 

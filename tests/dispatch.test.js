@@ -80,6 +80,10 @@ describe('resolveRemoteDispatch', () => {
         expect(resolveRemoteDispatch('status service', baseOptions)).toEqual({
             type: 'show_service_menu'
         });
+
+        expect(resolveRemoteDispatch('events', baseOptions)).toEqual({
+            type: 'show_events'
+        });
     });
 
     it('detects session cowork intents', () => {
