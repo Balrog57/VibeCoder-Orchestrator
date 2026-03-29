@@ -14,6 +14,7 @@ tasks/
 .viberemote/
 tmp_verify_steps/
 .tmp-tests-*/
+.tmp-smoke-remote/
 
 # Database/Cache
 *.sqlite*

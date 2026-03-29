@@ -5,6 +5,7 @@
   "main": "index.js",
   "scripts": {
     "start": "electron .",
+    "smoke": "node scripts/smoke-remote-cli.mjs",
     "test": "vitest run --dir tests --pool=threads",
     "test:watch": "vitest --dir tests --pool=threads"
   },
