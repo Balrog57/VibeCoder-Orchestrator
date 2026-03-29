@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+    appendRunHistory,
     createSessionState,
     ensureSessionState,
     finishSessionRun,
@@ -49,5 +50,18 @@ describe('session state helpers', () => {
         expect(session.state).toBe('idle');
         expect(session.isProcessing).toBe(false);
         expect(session.activeRun).toBeNull();
+
+        session = appendRunHistory(session, {
+            success: true,
+            cli: 'claude',
+            attempts: 2,
+            taskProfile: 'fix',
+            workspaceMode: 'worktree'
+        });
+        expect(session.runHistory).toHaveLength(1);
+        expect(session.runHistory[0]).toMatchObject({
+            cli: 'claude',
+            taskProfile: 'fix'
+        });
     });
 });

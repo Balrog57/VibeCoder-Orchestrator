@@ -20,6 +20,7 @@ export function createMainMenuKeyboard(session) {
             Markup.button.callback(t(locale, 'menu_open_ide'), 'action:open_ide')
         ],
         [
+            Markup.button.callback(t(locale, 'menu_runs'), 'action:runs'),
             Markup.button.callback(t(locale, 'menu_history'), 'action:history'),
             Markup.button.callback(t(locale, 'menu_memory'), 'action:memory')
         ],

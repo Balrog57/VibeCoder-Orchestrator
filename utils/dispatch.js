@@ -294,6 +294,10 @@ export function resolveRemoteDispatch(rawText, {
         return { type: 'show_history' };
     }
 
+    if (matchCommand(text, ['runs', 'run', 'derniers runs', 'last runs', 'run status', 'tentatives'])) {
+        return { type: 'show_runs' };
+    }
+
     if (matchCommand(text, ['save', 'sauvegarde', 'sauver', 'enregistre session'])) {
         return { type: 'manual_save' };
     }

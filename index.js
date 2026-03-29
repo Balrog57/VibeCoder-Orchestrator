@@ -39,7 +39,8 @@ import {
     setSessionState,
     startSessionRun,
     recordFallback,
-    finishSessionRun
+    finishSessionRun,
+    appendRunHistory
 } from './utils/session-state.js';
 import { getDefaultWorkspaceStatus, prepareSessionWorkspace } from './utils/workspace-sessions.js';
 import { getTaskProfile } from './utils/task-profiles.js';
@@ -316,6 +317,8 @@ function describeDispatch(locale, dispatch) {
             return t(locale, 'dispatch_intent_language_menu');
         case 'show_help':
             return t(locale, 'dispatch_intent_help');
+        case 'show_runs':
+            return t(locale, 'dispatch_intent_runs');
         case 'show_memory':
             return t(locale, 'menu_memory');
         case 'show_history':
@@ -411,6 +414,31 @@ ${t(locale, 'memory_context')}:
 ${contextSnippet}`;
 }
 
+async function buildRunsOverview(chatId) {
+    const session = getSession(chatId);
+    const locale = session.locale || 'fr';
+
+    if (!session.runHistory?.length) {
+        return t(locale, 'runs_none');
+    }
+
+    const lines = session.runHistory.slice(0, 5).map((run, index) => {
+        const status = run.success ? 'OK' : 'FAIL';
+        const parts = [
+            `${index + 1}. ${status}`,
+            run.cli || t(locale, 'status_auto'),
+            taskProfileLabel(locale, run.taskProfile),
+            workspaceModeLabel(locale, run.workspaceMode)
+        ];
+        if (run.attempts) {
+            parts.push(`${run.attempts}x`);
+        }
+        return parts.join(' | ');
+    });
+
+    return `${t(locale, 'runs_title', { repo: escapeMd(session.activeRepo || t(locale, 'status_repo_none')) })}\n\n${lines.join('\n')}`;
+}
+
 async function handleDispatchedCommand(chatId, dispatch, { source, feedback, uiContext }) {
     const session = getSession(chatId);
     const locale = session.locale || 'fr';
@@ -470,6 +498,18 @@ async function handleDispatchedCommand(chatId, dispatch, { source, feedback, uiC
             }
 
             await uiContext.reply(await buildMemoryOverview(chatId), {
+                parse_mode: 'Markdown',
+                ...createBackKeyboard(locale)
+            });
+            return true;
+        }
+        case 'show_runs': {
+            if (!session.activeRepo) {
+                await feedback.reply(t(locale, 'no_project'));
+                return true;
+            }
+
+            await uiContext.reply(await buildRunsOverview(chatId), {
                 parse_mode: 'Markdown',
                 ...createBackKeyboard(locale)
             });
@@ -896,6 +936,15 @@ bot.command('history', async ctx => {
     return ctx.reply(`${t(locale, 'history_title', { repo: escapeMd(session.activeRepo) })}\n\n${lines.join('\n')}`, { parse_mode: 'Markdown' });
 });
 
+bot.command('runs', async ctx => {
+    const session = getSession(ctx.chat.id);
+    const locale = session.locale || 'fr';
+    if (!session.activeRepo) {
+        return ctx.reply(t(locale, 'no_project'), { parse_mode: 'Markdown' });
+    }
+    return ctx.reply(await buildRunsOverview(ctx.chat.id), { parse_mode: 'Markdown' });
+});
+
 bot.command('save', async ctx => {
     const session = getSession(ctx.chat.id);
     const locale = session.locale || 'fr';
@@ -1086,6 +1135,24 @@ bot.action('action:history', async ctx => {
     broadcastMenu(ctx.chat.id, Markup.inlineKeyboard([[Markup.button.callback(t(locale, 'menu_back'), 'nav:main')]]));
 });
 
+bot.action('action:runs', async ctx => {
+    const session = getSession(ctx.chat.id);
+    const locale = session.locale || 'fr';
+    if (!session.activeRepo) {
+        await ctx.editMessageText(t(locale, 'no_project'), {
+            parse_mode: 'Markdown',
+            ...createMainMenuKeyboard(session)
+        });
+        return;
+    }
+
+    await ctx.editMessageText(await buildRunsOverview(ctx.chat.id), {
+        parse_mode: 'Markdown',
+        ...Markup.inlineKeyboard([[Markup.button.callback(t(locale, 'menu_back'), 'nav:main')]])
+    });
+    broadcastMenu(ctx.chat.id, Markup.inlineKeyboard([[Markup.button.callback(t(locale, 'menu_back'), 'nav:main')]]));
+});
+
 bot.action('action:memory', async ctx => {
     const session = getSession(ctx.chat.id);
     const locale = session.locale || 'fr';
@@ -1267,6 +1334,14 @@ async function processPipelineRequest(chatId, text, feedback) {
         });
 
         if (success) {
+            updateSession(chatId, current => appendRunHistory(current, {
+                finishedAt: new Date().toISOString(),
+                success: true,
+                cli: usedCli,
+                attempts: attempt,
+                taskProfile: activeTaskProfile.id,
+                workspaceMode: workspace.mode
+            }));
             try { await autoCommitGit(targetPath, "VibeCode: " + text.slice(0, 30)); } catch (e) {}
             await saveSessionSummary(BASE_PROG_PATH, {
                 repo: session.activeRepo, cli: usedCli,
@@ -1276,10 +1351,26 @@ async function processPipelineRequest(chatId, text, feedback) {
             await feedback.reply(t(locale, 'run_success', { count: filesCreated.length }));
             notifyGUI('message-to-gui', { text: `🎯 Succès ! ${filesCreated.length} fichiers.` });
         } else {
+            updateSession(chatId, current => appendRunHistory(current, {
+                finishedAt: new Date().toISOString(),
+                success: false,
+                cli: usedCli,
+                attempts: Math.max(attempt - 1, 1),
+                taskProfile: activeTaskProfile.id,
+                workspaceMode: workspace.mode
+            }));
             await feedback.reply(t(locale, 'run_failed', { max: MAX_ATTEMPTS }));
         }
     } catch (e) {
         console.error(e);
+        updateSession(chatId, current => appendRunHistory(current, {
+            finishedAt: new Date().toISOString(),
+            success: false,
+            cli: agentOptions.defaultCli || activeTaskProfile.preferredCli || 'auto',
+            attempts: current.activeRun?.attempts || 0,
+            taskProfile: activeTaskProfile.id,
+            workspaceMode: workspace.mode
+        }));
         if (Array.isArray(e.traces)) {
             for (const trace of e.traces) {
                 try {
@@ -1526,6 +1617,15 @@ ipcMain.on('gui-action', async (event, action) => {
         }
         const lines = history.slice(0, 5).map((h, idx) => `${idx + 1}. ${h.filename}`).join('\n');
         notifyGUI('message-to-gui', { text: `${t(locale, 'history_title', { repo: session.activeRepo })}\n${lines}` });
+        return;
+    }
+    if (action === 'action:runs') {
+        const locale = session.locale || 'fr';
+        if (!session.activeRepo) {
+            notifyGUI('message-to-gui', { text: t(locale, 'no_project') });
+            return;
+        }
+        notifyGUI('message-to-gui', { text: await buildRunsOverview(chatId) });
         return;
     }
     if (action === 'action:memory') {

@@ -41,6 +41,7 @@ const DEFAULT_STATE = Object.freeze({
     lastTrace: null,
     fallbackCount: 0,
     activeRun: null,
+    runHistory: [],
     locale: 'fr'
 });
 
@@ -74,6 +75,7 @@ export function ensureSessionState(session = {}) {
     merged.disabledClis = Array.isArray(merged.disabledClis) ? [...merged.disabledClis] : [];
     merged.disabledIdes = Array.isArray(merged.disabledIdes) ? [...merged.disabledIdes] : [];
     merged.lastFiles = Array.isArray(merged.lastFiles) ? [...merged.lastFiles] : [];
+    merged.runHistory = Array.isArray(merged.runHistory) ? [...merged.runHistory] : [];
     merged.activeRun = merged.activeRun ? { ...merged.activeRun } : null;
     merged.workspaceStatus = merged.workspaceStatus || getDefaultWorkspaceStatus(merged.workspaceMode);
     merged.workspacePath = merged.workspacePath || null;
@@ -148,5 +150,16 @@ export function finishSessionRun(session, { state = 'idle', dispatchMode = 'idle
         nextSession.activeRun.finishedAt = new Date().toISOString();
     }
     nextSession.activeRun = null;
+    return nextSession;
+}
+
+export function appendRunHistory(session, runEntry) {
+    const nextSession = ensureSessionState(session);
+    const entry = runEntry ? { ...runEntry } : null;
+    if (!entry) {
+        return nextSession;
+    }
+
+    nextSession.runHistory = [entry, ...nextSession.runHistory].slice(0, 10);
     return nextSession;
 }

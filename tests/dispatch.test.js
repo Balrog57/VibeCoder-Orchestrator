@@ -47,6 +47,12 @@ describe('resolveRemoteDispatch', () => {
         });
     });
 
+    it('detects local runs overview intent', () => {
+        expect(resolveRemoteDispatch('derniers runs', baseOptions)).toEqual({
+            type: 'show_runs'
+        });
+    });
+
     it('detects task profile switching without swallowing coding prompts', () => {
         expect(resolveRemoteDispatch('mode review', baseOptions)).toEqual({
             type: 'set_task_profile',
