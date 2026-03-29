@@ -176,6 +176,17 @@ function wantsRerunLast(text) {
     ]);
 }
 
+function wantsRunDetail(text) {
+    return matchCommand(text, [
+        'detail run',
+        'details run',
+        'dernier run detail',
+        'detail dernier run',
+        'run detail',
+        'last run detail'
+    ]);
+}
+
 function wantsRefreshClis(text) {
     return hasAny(text, ['refresh cli', 'rafraichis cli', 'rafraichir cli', 'scan cli', 'rescan cli']);
 }
@@ -312,6 +323,10 @@ export function resolveRemoteDispatch(rawText, {
 
     if (wantsRerunLast(text)) {
         return { type: 'rerun_last' };
+    }
+
+    if (wantsRunDetail(text)) {
+        return { type: 'show_run_detail' };
     }
 
     if (matchCommand(text, ['save', 'sauvegarde', 'sauver', 'enregistre session'])) {

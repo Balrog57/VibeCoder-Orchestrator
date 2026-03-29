@@ -269,6 +269,9 @@ function createRunsKeyboard(locale, session) {
     if (session?.lastPrompt) {
         buttons.push(Markup.button.callback(t(locale, 'menu_rerun'), 'action:rerun_last'));
     }
+    if (session?.runHistory?.length) {
+        buttons.push(Markup.button.callback(t(locale, 'menu_run_detail'), 'action:run_detail'));
+    }
     buttons.push(Markup.button.callback(t(locale, 'menu_back'), 'nav:main'));
     return Markup.inlineKeyboard([buttons]);
 }
@@ -330,6 +333,8 @@ function describeDispatch(locale, dispatch) {
             return t(locale, 'dispatch_intent_runs');
         case 'rerun_last':
             return t(locale, 'dispatch_intent_rerun');
+        case 'show_run_detail':
+            return t(locale, 'dispatch_intent_run_detail');
         case 'show_memory':
             return t(locale, 'menu_memory');
         case 'show_history':
@@ -458,6 +463,42 @@ async function buildRunsOverview(chatId) {
     return `${t(locale, 'runs_title', { repo: escapeMd(session.activeRepo || t(locale, 'status_repo_none')) })}\n\n${lines.join('\n')}`;
 }
 
+async function buildLastRunDetail(chatId) {
+    const session = getSession(chatId);
+    const locale = session.locale || 'fr';
+    const run = session.runHistory?.[0];
+
+    if (!run) {
+        return t(locale, 'run_detail_none');
+    }
+
+    const status = run.success ? 'OK' : 'FAIL';
+    const traces = Array.isArray(run.traces) && run.traces.length
+        ? run.traces.map((trace, index) => {
+            const reason = fallbackReasonLabel(locale, trace.reason);
+            const duration = trace.durationMs ? ` ${trace.durationMs}ms` : '';
+            return `${index + 1}. ${trace.cli} | ${trace.status} | ${reason}${duration}`;
+        }).join('\n')
+        : '-';
+
+    return `${t(locale, 'run_detail_title', { repo: escapeMd(session.activeRepo || t(locale, 'status_repo_none')) })}
+
+Status: ${status}
+CLI: ${run.cli || t(locale, 'status_auto')}
+${t(locale, 'settings_task_profile')}: ${taskProfileLabel(locale, run.taskProfile)}
+${t(locale, 'settings_workspace_mode')}: ${workspaceModeLabel(locale, run.workspaceMode)}
+Attempts: ${run.attempts || 0}
+
+Prompt:
+${escapeMd(run.promptSnippet || session.lastPrompt || '-')}
+
+Detail:
+${escapeMd(run.detail || '-')}
+
+Traces:
+${traces}`;
+}
+
 async function rerunLastRequest(chatId, feedback) {
     const session = getSession(chatId);
     const locale = session.locale || 'fr';
@@ -550,6 +591,18 @@ async function handleDispatchedCommand(chatId, dispatch, { source, feedback, uiC
         case 'rerun_last':
             await rerunLastRequest(chatId, feedback);
             return true;
+        case 'show_run_detail': {
+            if (!session.activeRepo) {
+                await feedback.reply(t(locale, 'no_project'));
+                return true;
+            }
+
+            await uiContext.reply(await buildLastRunDetail(chatId), {
+                parse_mode: 'Markdown',
+                ...createRunsKeyboard(locale, getSession(chatId))
+            });
+            return true;
+        }
         case 'show_history': {
             if (!session.activeRepo) {
                 await feedback.reply(t(locale, 'no_project'));
@@ -996,6 +1049,15 @@ bot.command('rerun', async ctx => {
     return rerunLastRequest(ctx.chat.id, feedback);
 });
 
+bot.command('run_detail', async ctx => {
+    const session = getSession(ctx.chat.id);
+    const locale = session.locale || 'fr';
+    if (!session.activeRepo) {
+        return ctx.reply(t(locale, 'no_project'), { parse_mode: 'Markdown' });
+    }
+    return ctx.reply(await buildLastRunDetail(ctx.chat.id), { parse_mode: 'Markdown', ...createRunsKeyboard(locale, session) });
+});
+
 bot.command('save', async ctx => {
     const session = getSession(ctx.chat.id);
     const locale = session.locale || 'fr';
@@ -1217,6 +1279,24 @@ bot.action('action:rerun_last', async ctx => {
     await rerunLastRequest(ctx.chat.id, feedback);
 });
 
+bot.action('action:run_detail', async ctx => {
+    const session = getSession(ctx.chat.id);
+    const locale = session.locale || 'fr';
+    if (!session.activeRepo) {
+        await ctx.editMessageText(t(locale, 'no_project'), {
+            parse_mode: 'Markdown',
+            ...createMainMenuKeyboard(session)
+        });
+        return;
+    }
+
+    await ctx.editMessageText(await buildLastRunDetail(ctx.chat.id), {
+        parse_mode: 'Markdown',
+        ...createRunsKeyboard(locale, session)
+    });
+    broadcastMenu(ctx.chat.id, createRunsKeyboard(locale, session));
+});
+
 bot.action('action:memory', async ctx => {
     const session = getSession(ctx.chat.id);
     const locale = session.locale || 'fr';
@@ -1340,6 +1420,7 @@ async function processPipelineRequest(chatId, text, feedback) {
         }
         let finalCode = "", filesCreated = [], testResult = "", sessionSummary = "";
         let usedCli = agentOptions.defaultCli || 'auto';
+        let latestRunTraces = [];
         await initMemory(BASE_PROG_PATH);
         await appendToDailyLog(BASE_PROG_PATH, session.activeRepo, `Démarrage: ${text.slice(0, 80)}...`);
 
@@ -1359,7 +1440,9 @@ async function processPipelineRequest(chatId, text, feedback) {
             finalCode = agentResult.output;
             usedCli = agentResult.usedCli || usedCli;
             if (Array.isArray(agentResult.traces)) {
+                latestRunTraces = [];
                 for (const trace of agentResult.traces) {
+                    latestRunTraces.push(trace);
                     session = updateSession(chatId, current => recordFallback(current, trace));
                     await appendFallbackTrace(BASE_PROG_PATH, session.activeRepo, trace);
                     if (trace.status === 'failed') {
@@ -1406,7 +1489,8 @@ async function processPipelineRequest(chatId, text, feedback) {
                 taskProfile: activeTaskProfile.id,
                 workspaceMode: workspace.mode,
                 promptSnippet: text,
-                detail: filesCreated.join(', ')
+                detail: filesCreated.join(', '),
+                traces: latestRunTraces
             }));
             try { await autoCommitGit(targetPath, "VibeCode: " + text.slice(0, 30)); } catch (e) {}
             await saveSessionSummary(BASE_PROG_PATH, {
@@ -1425,7 +1509,8 @@ async function processPipelineRequest(chatId, text, feedback) {
                 taskProfile: activeTaskProfile.id,
                 workspaceMode: workspace.mode,
                 promptSnippet: text,
-                detail: testResult || errorMessage || 'Run failed'
+                detail: testResult || errorMessage || 'Run failed',
+                traces: latestRunTraces
             }));
             await feedback.reply(t(locale, 'run_failed', { max: MAX_ATTEMPTS }));
         }
@@ -1439,7 +1524,8 @@ async function processPipelineRequest(chatId, text, feedback) {
             taskProfile: activeTaskProfile.id,
             workspaceMode: workspace.mode,
             promptSnippet: text,
-            detail: e.message
+            detail: e.message,
+            traces: Array.isArray(e.traces) ? e.traces : []
         }));
         if (Array.isArray(e.traces)) {
             for (const trace of e.traces) {
@@ -1707,6 +1793,16 @@ ipcMain.on('gui-action', async (event, action) => {
             sendUpdate: async (m) => notifyGUI('status-update', { text: m })
         };
         return rerunLastRequest(chatId, feedback);
+    }
+    if (action === 'action:run_detail') {
+        const locale = session.locale || 'fr';
+        if (!session.activeRepo) {
+            notifyGUI('message-to-gui', { text: t(locale, 'no_project') });
+            return;
+        }
+        notifyGUI('message-to-gui', { text: await buildLastRunDetail(chatId) });
+        notifyGUI('tiles-update', { tiles: createRunsKeyboard(locale, session).reply_markup.inline_keyboard });
+        return;
     }
     if (action === 'action:memory') {
         const locale = session.locale || 'fr';
