@@ -54,6 +54,8 @@ describe('session state helpers', () => {
         session = appendRunHistory(session, {
             success: true,
             cli: 'claude',
+            requestedCli: 'codex',
+            executionMode: 'cli_default',
             attempts: 2,
             taskProfile: 'fix',
             workspaceMode: 'worktree',
@@ -63,6 +65,8 @@ describe('session state helpers', () => {
         expect(session.runHistory).toHaveLength(1);
         expect(session.runHistory[0]).toMatchObject({
             cli: 'claude',
+            requestedCli: 'codex',
+            executionMode: 'cli_default',
             taskProfile: 'fix',
             promptSnippet: 'corrige le login'
         });

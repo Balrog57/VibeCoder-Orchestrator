@@ -142,6 +142,47 @@ function taskProfileLabel(locale, taskProfile) {
     return t(locale, `task_profile_${taskProfile || 'code'}`);
 }
 
+function executionModeLabel(locale, executionMode, requestedCli = null) {
+    switch (executionMode) {
+        case 'cli_strict':
+            return t(locale, 'run_mode_cli_strict', { cli: requestedCli || t(locale, 'status_auto') });
+        case 'cli_default':
+            return t(locale, 'run_mode_cli_default', { cli: requestedCli || t(locale, 'status_auto') });
+        case 'profile_preferred':
+            return t(locale, 'run_mode_profile_preferred', { cli: requestedCli || t(locale, 'status_auto') });
+        default:
+            return t(locale, 'run_mode_auto');
+    }
+}
+
+function resolveExecutionMeta({ overrideCli = null, sessionDefaultCli = null, profilePreferredCli = null }) {
+    if (overrideCli) {
+        return {
+            executionMode: 'cli_strict',
+            requestedCli: overrideCli
+        };
+    }
+
+    if (sessionDefaultCli) {
+        return {
+            executionMode: 'cli_default',
+            requestedCli: sessionDefaultCli
+        };
+    }
+
+    if (profilePreferredCli) {
+        return {
+            executionMode: 'profile_preferred',
+            requestedCli: profilePreferredCli
+        };
+    }
+
+    return {
+        executionMode: 'auto',
+        requestedCli: null
+    };
+}
+
 function buildTraceLabel(locale, trace) {
     if (!trace?.cli) return t(locale, 'gui_monitor_none');
     return `${trace.cli} - ${fallbackReasonLabel(locale, trace.reason)}`;
@@ -498,6 +539,7 @@ async function buildRunsOverview(chatId) {
         const parts = [
             `${index + 1}. ${status}`,
             run.cli || t(locale, 'status_auto'),
+            executionModeLabel(locale, run.executionMode, run.requestedCli),
             taskProfileLabel(locale, run.taskProfile),
             workspaceModeLabel(locale, run.workspaceMode)
         ];
@@ -547,6 +589,8 @@ async function buildRunDetail(chatId, runIndex = 0) {
 
 Status: ${status}
 CLI: ${run.cli || t(locale, 'status_auto')}
+${t(locale, 'run_mode_label')}: ${executionModeLabel(locale, run.executionMode, run.requestedCli)}
+${t(locale, 'run_requested_cli')}: ${run.requestedCli || t(locale, 'status_auto')}
 ${t(locale, 'settings_task_profile')}: ${taskProfileLabel(locale, run.taskProfile)}
 ${t(locale, 'settings_workspace_mode')}: ${workspaceModeLabel(locale, run.workspaceMode)}
 Attempts: ${run.attempts || 0}
@@ -1591,11 +1635,17 @@ async function processPipelineRequest(chatId, text, feedback, options = {}) {
     }
     if (!session.activeRepo) return feedback.reply(t(locale, 'no_project'));
 
+    const activeTaskProfile = getTaskProfile(session.taskProfile);
+    const executionMeta = resolveExecutionMeta({
+        overrideCli,
+        sessionDefaultCli: session.defaultCli,
+        profilePreferredCli: activeTaskProfile.preferredCli
+    });
     session = updateSession(chatId, current => startSessionRun(current, text));
     notifyGUI('status-update', { text: t(locale, 'status_processing', { repo: session.activeRepo }) });
 
     const agentOptions = {
-        defaultCli: overrideCli || session.defaultCli,
+        defaultCli: executionMeta.requestedCli,
         defaultModel: overrideCli && overrideCli !== session.defaultCli ? null : session.defaultModel,
         disabledClis: overrideCli
             ? session.disabledClis.filter(cli => cli !== overrideCli)
@@ -1603,7 +1653,6 @@ async function processPipelineRequest(chatId, text, feedback, options = {}) {
         preferredCli: null,
         strictCli
     };
-    const activeTaskProfile = getTaskProfile(session.taskProfile);
 
     if (!overrideCli && !agentOptions.defaultCli && activeTaskProfile.preferredCli) {
         agentOptions.preferredCli = activeTaskProfile.preferredCli;
@@ -1693,6 +1742,8 @@ async function processPipelineRequest(chatId, text, feedback, options = {}) {
                 finishedAt: new Date().toISOString(),
                 success: true,
                 cli: usedCli,
+                requestedCli: executionMeta.requestedCli,
+                executionMode: executionMeta.executionMode,
                 attempts: attempt,
                 taskProfile: activeTaskProfile.id,
                 workspaceMode: workspace.mode,
@@ -1715,6 +1766,8 @@ async function processPipelineRequest(chatId, text, feedback, options = {}) {
                 finishedAt: new Date().toISOString(),
                 success: false,
                 cli: usedCli,
+                requestedCli: executionMeta.requestedCli,
+                executionMode: executionMeta.executionMode,
                 attempts: Math.max(attempt - 1, 1),
                 taskProfile: activeTaskProfile.id,
                 workspaceMode: workspace.mode,
@@ -1732,6 +1785,8 @@ async function processPipelineRequest(chatId, text, feedback, options = {}) {
             finishedAt: new Date().toISOString(),
             success: false,
             cli: agentOptions.defaultCli || activeTaskProfile.preferredCli || 'auto',
+            requestedCli: executionMeta.requestedCli,
+            executionMode: executionMeta.executionMode,
             attempts: current.activeRun?.attempts || 0,
             taskProfile: activeTaskProfile.id,
             workspaceMode: workspace.mode,
