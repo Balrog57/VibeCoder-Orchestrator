@@ -84,6 +84,11 @@ describe('resolveRemoteDispatch', () => {
         expect(resolveRemoteDispatch('events', baseOptions)).toEqual({
             type: 'show_events'
         });
+
+        expect(resolveRemoteDispatch('events telegram', baseOptions)).toEqual({
+            type: 'set_event_filter',
+            value: 'telegram'
+        });
     });
 
     it('detects session cowork intents', () => {

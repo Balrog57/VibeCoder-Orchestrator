@@ -349,6 +349,18 @@ function wantsRefreshIdes(text) {
     return hasAny(text, ['refresh ide', 'rafraichis ide', 'rafraichir ide', 'scan ide', 'rescan ide']);
 }
 
+function extractEventFilter(text) {
+    const isEventsCommand = hasAny(text, ['events', 'event', 'audit', 'journal remote']);
+    if (!isEventsCommand) return null;
+
+    if (text.includes('telegram')) return 'telegram';
+    if (text.includes('gui')) return 'gui';
+    if (hasAny(text, ['permission', 'permissions'])) return 'permission';
+    if (text.includes('pipeline')) return 'pipeline';
+    if (hasAny(text, ['all', 'tous'])) return 'all';
+    return null;
+}
+
 export function extractRemoteSessionTarget(rawText = '') {
     const raw = (rawText || '').trim();
     if (!raw) return null;
@@ -528,6 +540,11 @@ export function resolveRemoteDispatch(rawText, {
 
     if (matchCommand(text, ['help', 'aide', 'commands', 'commandes'])) {
         return { type: 'show_help' };
+    }
+
+    const eventFilter = extractEventFilter(text);
+    if (eventFilter) {
+        return { type: 'set_event_filter', value: eventFilter };
     }
 
     if (matchCommand(text, ['events', 'event', 'audit', 'journal remote', 'remote events'])) {

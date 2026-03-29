@@ -15,6 +15,14 @@ export const SESSION_STATES = Object.freeze([
     'failed'
 ]);
 
+export const EVENT_FILTERS = Object.freeze([
+    'all',
+    'telegram',
+    'gui',
+    'permission',
+    'pipeline'
+]);
+
 const DEFAULT_STATE = Object.freeze({
     activeRepo: null,
     browserPath: '',
@@ -49,6 +57,7 @@ const DEFAULT_STATE = Object.freeze({
     activeRun: null,
     runHistory: [],
     remoteEventHistory: [],
+    eventFilter: 'all',
     locale: 'fr'
 });
 
@@ -80,6 +89,7 @@ export function ensureSessionState(session = {}) {
     merged.sessionId = merged.sessionId || buildSessionId();
     merged.workspaceMode = normalizeWorkspaceMode(merged.workspaceMode);
     merged.permissionMode = normalizePermissionMode(merged.permissionMode);
+    merged.eventFilter = EVENT_FILTERS.includes(merged.eventFilter) ? merged.eventFilter : 'all';
     merged.disabledClis = Array.isArray(merged.disabledClis) ? [...merged.disabledClis] : [];
     merged.disabledIdes = Array.isArray(merged.disabledIdes) ? [...merged.disabledIdes] : [];
     merged.fallbackCliOrder = Array.isArray(merged.fallbackCliOrder) ? [...merged.fallbackCliOrder] : [];

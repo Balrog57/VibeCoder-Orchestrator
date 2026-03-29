@@ -215,8 +215,21 @@ export function createServiceKeyboard(locale = 'fr') {
     ]);
 }
 
-export function createEventsKeyboard(locale = 'fr') {
+export function createEventsKeyboard(locale = 'fr', activeFilter = 'all') {
+    const filters = ['all', 'telegram', 'gui', 'permission', 'pipeline'];
+    const filterRows = [
+        filters.slice(0, 3).map(filter => Markup.button.callback(
+            `${activeFilter === filter ? 'ON' : 'SET'} ${t(locale, `event_filter_${filter}`)}`,
+            `events_filter:${filter}`
+        )),
+        filters.slice(3).map(filter => Markup.button.callback(
+            `${activeFilter === filter ? 'ON' : 'SET'} ${t(locale, `event_filter_${filter}`)}`,
+            `events_filter:${filter}`
+        ))
+    ];
+
     return Markup.inlineKeyboard([
+        ...filterRows,
         [Markup.button.callback(t(locale, 'menu_refresh'), 'nav:events')],
         [Markup.button.callback(t(locale, 'menu_back'), 'nav:main')]
     ]);

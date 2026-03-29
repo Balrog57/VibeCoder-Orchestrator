@@ -591,11 +591,21 @@ function buildServiceStatusText(locale) {
 }
 
 function buildRemoteEventsOverview(locale, session) {
-    if (!session.remoteEventHistory?.length) {
-        return `${t(locale, 'events_title', { slot: sessionSlotLabel(locale, session.sessionSlot) })}\n\n${t(locale, 'events_none')}`;
+    const activeFilter = session.eventFilter || 'all';
+    const filteredEvents = (session.remoteEventHistory || []).filter(entry => {
+        if (activeFilter === 'all') return true;
+        if (activeFilter === 'telegram') return entry.source === 'telegram';
+        if (activeFilter === 'gui') return entry.source === 'gui';
+        if (activeFilter === 'permission') return String(entry.type || '').startsWith('permission_');
+        if (activeFilter === 'pipeline') return entry.type === 'pipeline_request';
+        return true;
+    });
+
+    if (!filteredEvents.length) {
+        return `${t(locale, 'events_title', { slot: sessionSlotLabel(locale, session.sessionSlot) })}\n\n${t(locale, 'events_filter_current')}: **${t(locale, `event_filter_${activeFilter}`)}**\n\n${t(locale, 'events_none')}`;
     }
 
-    const lines = session.remoteEventHistory.slice(0, 10).map((entry, index) => {
+    const lines = filteredEvents.slice(0, 10).map((entry, index) => {
         const typeLabel = t(locale, `event_type_${entry.type || 'incoming_text'}`);
         const sourceLabel = t(locale, entry.source === 'telegram'
             ? 'dispatch_source_telegram'
@@ -603,10 +613,11 @@ function buildRemoteEventsOverview(locale, session) {
                 ? 'dispatch_source_gui'
                 : 'dispatch_source_remote');
         const detail = entry.label || entry.text || t(locale, 'gui_monitor_none');
-        return `${index + 1}. ${typeLabel} | ${sourceLabel} | ${detail}`;
+        const timestamp = entry.createdAt ? entry.createdAt.slice(11, 16) : '--:--';
+        return `${index + 1}. ${timestamp} | ${typeLabel} | ${sourceLabel} | ${detail}`;
     });
 
-    return `${t(locale, 'events_title', { slot: sessionSlotLabel(locale, session.sessionSlot) })}\n\n${lines.join('\n')}`;
+    return `${t(locale, 'events_title', { slot: sessionSlotLabel(locale, session.sessionSlot) })}\n\n${t(locale, 'events_filter_current')}: **${t(locale, `event_filter_${activeFilter}`)}**\n\n${lines.join('\n')}`;
 }
 
 function createRunsKeyboard(locale, session) {
@@ -722,6 +733,10 @@ function describeDispatch(locale, dispatch) {
             return t(locale, 'dispatch_intent_help');
         case 'show_events':
             return t(locale, 'dispatch_intent_events');
+        case 'set_event_filter':
+            return t(locale, 'dispatch_intent_set_event_filter', {
+                filter: t(locale, `event_filter_${dispatch.value || 'all'}`)
+            });
         case 'show_runs':
             return t(locale, 'dispatch_intent_runs');
         case 'rerun_last':
@@ -1223,8 +1238,15 @@ async function handleDispatchedCommand(chatId, dispatch, { source, feedback, uiC
         case 'show_events':
             await uiContext.reply(buildRemoteEventsOverview(locale, session), {
                 parse_mode: 'Markdown',
-                ...createEventsKeyboard(locale)
+                ...createEventsKeyboard(locale, session.eventFilter || 'all')
             });
+            return true;
+        case 'set_event_filter':
+            updateSession(chatId, current => ({
+                ...current,
+                eventFilter: dispatch.value || 'all'
+            }));
+            await showEventsMenu(uiContext);
             return true;
         case 'show_memory': {
             if (!session.activeRepo) {
@@ -1739,7 +1761,7 @@ async function showEventsMenu(ctx) {
     syncGuiSession(ctx.chat.id);
     const locale = session.locale || 'fr';
     const text = buildRemoteEventsOverview(locale, session);
-    const keyboard = createEventsKeyboard(locale);
+    const keyboard = createEventsKeyboard(locale, session.eventFilter || 'all');
     await ctx.editMessageText(text, { parse_mode: 'Markdown', ...keyboard });
     broadcastMenu(ctx.chat.id, keyboard);
 }
@@ -2209,6 +2231,14 @@ bot.action('permission_deny', async ctx => {
         feedback: { reply: async (message) => ctx.reply(message, { parse_mode: 'Markdown' }) },
         uiContext: ctx
     });
+});
+
+bot.action(/events_filter:(.+)/, async ctx => {
+    const session = getSession(ctx.chat.id);
+    session.eventFilter = ctx.match[1];
+    syncGuiSession(ctx.chat.id);
+    await ctx.answerCbQuery(`${t(session.locale || 'fr', 'events_filter_current')}: ${t(session.locale || 'fr', `event_filter_${session.eventFilter}`)}`);
+    await showEventsMenu(ctx);
 });
 
 bot.action(/set_task_profile:(.+)/, async ctx => {
@@ -2941,6 +2971,11 @@ ipcMain.on('gui-action', async (event, action) => {
             feedback: { reply: async (message) => notifyGUI('message-to-gui', { text: message }) },
             uiContext: mockCtx
         });
+    }
+    if (action.startsWith('events_filter:')) {
+        session.eventFilter = action.split(':')[1];
+        syncGuiSession(chatId);
+        return showEventsMenu(mockCtx);
     }
     if (action.startsWith('set_task_profile:')) {
         session.taskProfile = action.split(':')[1];
