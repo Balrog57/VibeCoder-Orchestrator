@@ -65,6 +65,13 @@ describe('resolveRemoteDispatch', () => {
         });
     });
 
+    it('detects indexed run detail intent', () => {
+        expect(resolveRemoteDispatch('detail run 2', baseOptions)).toEqual({
+            type: 'show_run_detail',
+            value: 1
+        });
+    });
+
     it('detects task profile switching without swallowing coding prompts', () => {
         expect(resolveRemoteDispatch('mode review', baseOptions)).toEqual({
             type: 'set_task_profile',

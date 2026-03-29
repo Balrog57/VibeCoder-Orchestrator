@@ -276,6 +276,23 @@ function createRunsKeyboard(locale, session) {
     return Markup.inlineKeyboard([buttons]);
 }
 
+function createRunDetailKeyboard(locale, session, runIndex = 0) {
+    const buttons = [];
+    const maxIndex = Math.max((session?.runHistory?.length || 1) - 1, 0);
+
+    if (runIndex > 0) {
+        buttons.push(Markup.button.callback(t(locale, 'pager_prev'), `action:run_detail:${runIndex - 1}`));
+    }
+    if (runIndex < maxIndex) {
+        buttons.push(Markup.button.callback(t(locale, 'pager_next'), `action:run_detail:${runIndex + 1}`));
+    }
+    if (session?.lastPrompt) {
+        buttons.push(Markup.button.callback(t(locale, 'menu_rerun'), 'action:rerun_last'));
+    }
+    buttons.push(Markup.button.callback(t(locale, 'menu_back'), 'action:runs'));
+    return Markup.inlineKeyboard([buttons]);
+}
+
 function createTelegramReplyContext(ctx, action = 'remote:text') {
     return {
         ...ctx,
@@ -334,7 +351,9 @@ function describeDispatch(locale, dispatch) {
         case 'rerun_last':
             return t(locale, 'dispatch_intent_rerun');
         case 'show_run_detail':
-            return t(locale, 'dispatch_intent_run_detail');
+            return dispatch.value !== undefined
+                ? `${t(locale, 'dispatch_intent_run_detail')} #${Number(dispatch.value) + 1}`
+                : t(locale, 'dispatch_intent_run_detail');
         case 'show_memory':
             return t(locale, 'menu_memory');
         case 'show_history':
@@ -463,10 +482,11 @@ async function buildRunsOverview(chatId) {
     return `${t(locale, 'runs_title', { repo: escapeMd(session.activeRepo || t(locale, 'status_repo_none')) })}\n\n${lines.join('\n')}`;
 }
 
-async function buildLastRunDetail(chatId) {
+async function buildRunDetail(chatId, runIndex = 0) {
     const session = getSession(chatId);
     const locale = session.locale || 'fr';
-    const run = session.runHistory?.[0];
+    const normalizedIndex = Number.isFinite(runIndex) ? Math.max(0, runIndex) : 0;
+    const run = session.runHistory?.[normalizedIndex];
 
     if (!run) {
         return t(locale, 'run_detail_none');
@@ -481,7 +501,7 @@ async function buildLastRunDetail(chatId) {
         }).join('\n')
         : '-';
 
-    return `${t(locale, 'run_detail_title', { repo: escapeMd(session.activeRepo || t(locale, 'status_repo_none')) })}
+    return `${t(locale, 'run_detail_title', { repo: escapeMd(session.activeRepo || t(locale, 'status_repo_none')) })} #${normalizedIndex + 1}
 
 Status: ${status}
 CLI: ${run.cli || t(locale, 'status_auto')}
@@ -597,9 +617,9 @@ async function handleDispatchedCommand(chatId, dispatch, { source, feedback, uiC
                 return true;
             }
 
-            await uiContext.reply(await buildLastRunDetail(chatId), {
+            await uiContext.reply(await buildRunDetail(chatId, dispatch.value ?? 0), {
                 parse_mode: 'Markdown',
-                ...createRunsKeyboard(locale, getSession(chatId))
+                ...createRunDetailKeyboard(locale, getSession(chatId), dispatch.value ?? 0)
             });
             return true;
         }
@@ -1052,10 +1072,13 @@ bot.command('rerun', async ctx => {
 bot.command('run_detail', async ctx => {
     const session = getSession(ctx.chat.id);
     const locale = session.locale || 'fr';
+    const tokens = ctx.message.text.trim().split(/\s+/);
+    const parsedIndex = tokens[1] ? Number.parseInt(tokens[1], 10) - 1 : 0;
+    const runIndex = Number.isFinite(parsedIndex) && parsedIndex >= 0 ? parsedIndex : 0;
     if (!session.activeRepo) {
         return ctx.reply(t(locale, 'no_project'), { parse_mode: 'Markdown' });
     }
-    return ctx.reply(await buildLastRunDetail(ctx.chat.id), { parse_mode: 'Markdown', ...createRunsKeyboard(locale, session) });
+    return ctx.reply(await buildRunDetail(ctx.chat.id, runIndex), { parse_mode: 'Markdown', ...createRunDetailKeyboard(locale, session, runIndex) });
 });
 
 bot.command('save', async ctx => {
@@ -1290,11 +1313,30 @@ bot.action('action:run_detail', async ctx => {
         return;
     }
 
-    await ctx.editMessageText(await buildLastRunDetail(ctx.chat.id), {
+    await ctx.editMessageText(await buildRunDetail(ctx.chat.id, 0), {
         parse_mode: 'Markdown',
-        ...createRunsKeyboard(locale, session)
+        ...createRunDetailKeyboard(locale, session, 0)
     });
-    broadcastMenu(ctx.chat.id, createRunsKeyboard(locale, session));
+    broadcastMenu(ctx.chat.id, createRunDetailKeyboard(locale, session, 0));
+});
+
+bot.action(/action:run_detail:(\d+)/, async ctx => {
+    const session = getSession(ctx.chat.id);
+    const locale = session.locale || 'fr';
+    const runIndex = Number.parseInt(ctx.match[1], 10);
+    if (!session.activeRepo) {
+        await ctx.editMessageText(t(locale, 'no_project'), {
+            parse_mode: 'Markdown',
+            ...createMainMenuKeyboard(session)
+        });
+        return;
+    }
+
+    await ctx.editMessageText(await buildRunDetail(ctx.chat.id, runIndex), {
+        parse_mode: 'Markdown',
+        ...createRunDetailKeyboard(locale, session, runIndex)
+    });
+    broadcastMenu(ctx.chat.id, createRunDetailKeyboard(locale, session, runIndex));
 });
 
 bot.action('action:memory', async ctx => {
@@ -1800,8 +1842,19 @@ ipcMain.on('gui-action', async (event, action) => {
             notifyGUI('message-to-gui', { text: t(locale, 'no_project') });
             return;
         }
-        notifyGUI('message-to-gui', { text: await buildLastRunDetail(chatId) });
-        notifyGUI('tiles-update', { tiles: createRunsKeyboard(locale, session).reply_markup.inline_keyboard });
+        notifyGUI('message-to-gui', { text: await buildRunDetail(chatId, 0) });
+        notifyGUI('tiles-update', { tiles: createRunDetailKeyboard(locale, session, 0).reply_markup.inline_keyboard });
+        return;
+    }
+    if (action.startsWith('action:run_detail:')) {
+        const locale = session.locale || 'fr';
+        const runIndex = Number.parseInt(action.split(':').pop(), 10);
+        if (!session.activeRepo) {
+            notifyGUI('message-to-gui', { text: t(locale, 'no_project') });
+            return;
+        }
+        notifyGUI('message-to-gui', { text: await buildRunDetail(chatId, runIndex) });
+        notifyGUI('tiles-update', { tiles: createRunDetailKeyboard(locale, session, runIndex).reply_markup.inline_keyboard });
         return;
     }
     if (action === 'action:memory') {

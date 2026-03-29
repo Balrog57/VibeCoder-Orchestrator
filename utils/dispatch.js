@@ -187,6 +187,18 @@ function wantsRunDetail(text) {
     ]);
 }
 
+function extractRunDetailIndex(rawText) {
+    const match = rawText.match(/(?:detail|details)\s+(?:du\s+)?(?:run|dernier run|last run)\s+(\d+)/iu);
+    if (!match?.[1]) return null;
+
+    const parsed = Number.parseInt(match[1], 10);
+    if (!Number.isFinite(parsed) || parsed < 1) {
+        return null;
+    }
+
+    return parsed - 1;
+}
+
 function wantsRefreshClis(text) {
     return hasAny(text, ['refresh cli', 'rafraichis cli', 'rafraichir cli', 'scan cli', 'rescan cli']);
 }
@@ -323,6 +335,11 @@ export function resolveRemoteDispatch(rawText, {
 
     if (wantsRerunLast(text)) {
         return { type: 'rerun_last' };
+    }
+
+    const runDetailIndex = extractRunDetailIndex(raw);
+    if (runDetailIndex !== null) {
+        return { type: 'show_run_detail', value: runDetailIndex };
     }
 
     if (wantsRunDetail(text)) {
