@@ -91,6 +91,37 @@ function extractCli(text, availableClis) {
     return null;
 }
 
+function extractRerunWithCli(rawText, availableClis) {
+    const cli = findMentionedChoice(rawText, availableClis);
+    if (!cli) return null;
+
+    const text = foldText(rawText);
+    if (!hasAny(text, ['relance', 'relancer', 'rerun', 'retry'])) {
+        return null;
+    }
+
+    if (!hasAny(text, [' avec ', ' with ', ' using ', ' via ', ' force ', ' sur '])) {
+        return null;
+    }
+
+    const runIndex = extractRerunIndex(rawText);
+    if (runIndex !== null) {
+        return {
+            type: 'rerun_run_with_cli',
+            value: { index: runIndex, cli }
+        };
+    }
+
+    if (text.includes('dernier run') || text.includes('last run')) {
+        return {
+            type: 'rerun_last_with_cli',
+            value: cli
+        };
+    }
+
+    return null;
+}
+
 function extractIdeMode(text, availableIdes) {
     const mentioned = findMentionedChoice(text, availableIdes);
     if (!mentioned) return null;
@@ -265,6 +296,11 @@ export function resolveRemoteDispatch(rawText, {
     const ideToOpen = extractOpenIde(text, availableIdes);
     if (ideToOpen) {
         return { type: 'open_ide', value: ideToOpen };
+    }
+
+    const rerunWithCli = extractRerunWithCli(raw, availableClis);
+    if (rerunWithCli) {
+        return rerunWithCli;
     }
 
     const selectedCli = extractCli(text, availableClis);

@@ -276,9 +276,20 @@ function createRunsKeyboard(locale, session) {
     return Markup.inlineKeyboard([buttons]);
 }
 
+function formatCliTileLabel(cli) {
+    if (!cli) return 'CLI';
+    return cli.charAt(0).toUpperCase() + cli.slice(1);
+}
+
+function getRunReplayClis(session, runIndex = 0) {
+    const run = session?.runHistory?.[runIndex];
+    return [...new Set([run?.cli, ...AVAILABLE_CLIS].filter(Boolean))].slice(0, 3);
+}
+
 function createRunDetailKeyboard(locale, session, runIndex = 0) {
     const navButtons = [];
     const actionButtons = [];
+    const replayCliButtons = [];
     const maxIndex = Math.max((session?.runHistory?.length || 1) - 1, 0);
 
     if (runIndex > 0) {
@@ -290,12 +301,16 @@ function createRunDetailKeyboard(locale, session, runIndex = 0) {
     if (session?.runHistory?.[runIndex]) {
         actionButtons.push(Markup.button.callback(t(locale, 'menu_rerun'), `action:rerun_run:${runIndex}`));
         actionButtons.push(Markup.button.callback(t(locale, 'menu_run_open_ide'), `action:run_open_ide:${runIndex}`));
+        for (const cli of getRunReplayClis(session, runIndex)) {
+            replayCliButtons.push(Markup.button.callback(formatCliTileLabel(cli), `action:rerun_run_cli:${runIndex}:${encodeURIComponent(cli)}`));
+        }
     }
-    actionButtons.push(Markup.button.callback(t(locale, 'menu_back'), 'action:runs'));
 
     const rows = [];
     if (navButtons.length) rows.push(navButtons);
-    rows.push(actionButtons);
+    if (actionButtons.length) rows.push(actionButtons);
+    if (replayCliButtons.length) rows.push(replayCliButtons);
+    rows.push([Markup.button.callback(t(locale, 'menu_back'), 'action:runs')]);
     return Markup.inlineKeyboard(rows);
 }
 
@@ -363,6 +378,12 @@ function describeDispatch(locale, dispatch) {
         case 'rerun_run':
             return dispatch.value !== undefined
                 ? `${t(locale, 'dispatch_intent_rerun_run')} #${Number(dispatch.value) + 1}`
+                : t(locale, 'dispatch_intent_rerun_run');
+        case 'rerun_last_with_cli':
+            return t(locale, 'dispatch_intent_rerun_with_cli', { cli: dispatch.value });
+        case 'rerun_run_with_cli':
+            return dispatch.value?.cli
+                ? `${t(locale, 'dispatch_intent_rerun_with_cli', { cli: dispatch.value.cli })} #${Number(dispatch.value.index) + 1}`
                 : t(locale, 'dispatch_intent_rerun_run');
         case 'open_run_ide':
             return dispatch.value !== undefined
@@ -540,7 +561,7 @@ Traces:
 ${traces}`;
 }
 
-async function rerunLastRequest(chatId, feedback) {
+async function rerunLastRequest(chatId, feedback, overrideCli = null) {
     const session = getSession(chatId);
     const locale = session.locale || 'fr';
 
@@ -549,11 +570,15 @@ async function rerunLastRequest(chatId, feedback) {
         return;
     }
 
-    await feedback.reply(t(locale, 'rerun_started'));
-    return processPipelineRequest(chatId, session.lastPrompt, feedback);
+    if (overrideCli) {
+        await feedback.reply(t(locale, 'rerun_cli_started', { cli: overrideCli }));
+    } else {
+        await feedback.reply(t(locale, 'rerun_started'));
+    }
+    return processPipelineRequest(chatId, session.lastPrompt, feedback, { overrideCli });
 }
 
-async function rerunRunRequest(chatId, runIndex, feedback) {
+async function rerunRunRequest(chatId, runIndex, feedback, overrideCli = null) {
     const session = getSession(chatId);
     const locale = session.locale || 'fr';
     const { normalizedIndex, run } = getRunEntry(session, runIndex);
@@ -563,8 +588,15 @@ async function rerunRunRequest(chatId, runIndex, feedback) {
         return;
     }
 
-    await feedback.reply(t(locale, 'rerun_run_started', { index: normalizedIndex + 1 }));
-    return processPipelineRequest(chatId, run.prompt, feedback);
+    if (overrideCli) {
+        await feedback.reply(t(locale, 'rerun_run_cli_started', {
+            index: normalizedIndex + 1,
+            cli: overrideCli
+        }));
+    } else {
+        await feedback.reply(t(locale, 'rerun_run_started', { index: normalizedIndex + 1 }));
+    }
+    return processPipelineRequest(chatId, run.prompt, feedback, { overrideCli });
 }
 
 function openIdeForRun(session, runIndex) {
@@ -663,6 +695,12 @@ async function handleDispatchedCommand(chatId, dispatch, { source, feedback, uiC
             return true;
         case 'rerun_run':
             await rerunRunRequest(chatId, dispatch.value ?? 0, feedback);
+            return true;
+        case 'rerun_last_with_cli':
+            await rerunLastRequest(chatId, feedback, dispatch.value || null);
+            return true;
+        case 'rerun_run_with_cli':
+            await rerunRunRequest(chatId, dispatch.value?.index ?? 0, feedback, dispatch.value?.cli || null);
             return true;
         case 'show_run_detail': {
             if (!session.activeRepo) {
@@ -1125,6 +1163,10 @@ bot.command('rerun', async ctx => {
     const locale = session.locale || 'fr';
     const tokens = ctx.message.text.trim().split(/\s+/);
     const parsedIndex = tokens[1] ? Number.parseInt(tokens[1], 10) - 1 : null;
+    const cliToken = Number.isFinite(parsedIndex) && parsedIndex >= 0 ? tokens[2] : tokens[1];
+    const overrideCli = cliToken
+        ? AVAILABLE_CLIS.find(cli => cli.toLowerCase() === cliToken.toLowerCase()) || null
+        : null;
     const feedback = {
         reply: async (m) => ctx.reply(m, { parse_mode: 'Markdown' }),
         sendInitialStatus: async (m) => { await ctx.reply(m); },
@@ -1136,10 +1178,10 @@ bot.command('rerun', async ctx => {
     }
 
     if (Number.isFinite(parsedIndex) && parsedIndex >= 0) {
-        return rerunRunRequest(ctx.chat.id, parsedIndex, feedback);
+        return rerunRunRequest(ctx.chat.id, parsedIndex, feedback, overrideCli);
     }
 
-    return rerunLastRequest(ctx.chat.id, feedback);
+    return rerunLastRequest(ctx.chat.id, feedback, overrideCli);
 });
 
 bot.command('run_detail', async ctx => {
@@ -1388,6 +1430,20 @@ bot.action(/action:rerun_run:(\d+)/, async ctx => {
     await rerunRunRequest(ctx.chat.id, runIndex, feedback);
 });
 
+bot.action(/action:rerun_run_cli:(\d+):(.+)/, async ctx => {
+    const locale = getSession(ctx.chat.id).locale || 'fr';
+    const runIndex = Number.parseInt(ctx.match[1], 10);
+    const cli = decodeURIComponent(ctx.match[2]);
+    const feedback = {
+        reply: async (m) => ctx.reply(m, { parse_mode: 'Markdown' }),
+        sendInitialStatus: async (m) => { await ctx.reply(m); },
+        sendUpdate: async (m) => { await ctx.reply(m); }
+    };
+
+    await ctx.answerCbQuery(`${formatCliTileLabel(cli)} #${runIndex + 1}`);
+    await rerunRunRequest(ctx.chat.id, runIndex, feedback, cli);
+});
+
 bot.action('action:run_detail', async ctx => {
     const session = getSession(ctx.chat.id);
     const locale = session.locale || 'fr';
@@ -1518,9 +1574,10 @@ bot.command('start', async ctx => {
 });
 
 // --- PIPELINE HANDLER (REUSABLE) ---
-async function processPipelineRequest(chatId, text, feedback) {
+async function processPipelineRequest(chatId, text, feedback, options = {}) {
     let session = getSession(chatId);
     const locale = session.locale || 'fr';
+    const overrideCli = options.overrideCli || null;
     if (session.isProcessing) {
         await feedback.reply(t(locale, 'already_processing'));
         return;
@@ -1531,14 +1588,16 @@ async function processPipelineRequest(chatId, text, feedback) {
     notifyGUI('status-update', { text: t(locale, 'status_processing', { repo: session.activeRepo }) });
 
     const agentOptions = {
-        defaultCli: session.defaultCli,
-        defaultModel: session.defaultModel,
-        disabledClis: session.disabledClis,
+        defaultCli: overrideCli || session.defaultCli,
+        defaultModel: overrideCli && overrideCli !== session.defaultCli ? null : session.defaultModel,
+        disabledClis: overrideCli
+            ? session.disabledClis.filter(cli => cli !== overrideCli)
+            : session.disabledClis,
         preferredCli: null
     };
     const activeTaskProfile = getTaskProfile(session.taskProfile);
 
-    if (!agentOptions.defaultCli && activeTaskProfile.preferredCli) {
+    if (!overrideCli && !agentOptions.defaultCli && activeTaskProfile.preferredCli) {
         agentOptions.preferredCli = activeTaskProfile.preferredCli;
     }
     if (!agentOptions.defaultModel && activeTaskProfile.preferredModel) {
@@ -1940,6 +1999,17 @@ ipcMain.on('gui-action', async (event, action) => {
             sendUpdate: async (m) => notifyGUI('status-update', { text: m })
         };
         return rerunLastRequest(chatId, feedback);
+    }
+    if (action.startsWith('action:rerun_run_cli:')) {
+        const feedback = {
+            reply: async (m) => notifyGUI('message-to-gui', { text: m }),
+            sendInitialStatus: async (m) => notifyGUI('status-update', { text: m }),
+            sendUpdate: async (m) => notifyGUI('status-update', { text: m })
+        };
+        const [, , runIndexRaw, cliRaw] = action.split(':');
+        const runIndex = Number.parseInt(runIndexRaw, 10);
+        const cli = decodeURIComponent(cliRaw || '');
+        return rerunRunRequest(chatId, runIndex, feedback, cli || null);
     }
     if (action.startsWith('action:rerun_run:')) {
         const feedback = {

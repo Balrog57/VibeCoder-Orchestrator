@@ -79,6 +79,21 @@ describe('resolveRemoteDispatch', () => {
         });
     });
 
+    it('detects rerun with an explicit CLI', () => {
+        expect(resolveRemoteDispatch('relance dernier run avec codex', baseOptions)).toEqual({
+            type: 'rerun_last_with_cli',
+            value: 'codex'
+        });
+
+        expect(resolveRemoteDispatch('relance run 3 avec claude', baseOptions)).toEqual({
+            type: 'rerun_run_with_cli',
+            value: {
+                index: 2,
+                cli: 'claude'
+            }
+        });
+    });
+
     it('detects indexed run IDE intent', () => {
         expect(resolveRemoteDispatch('ouvre ide run 2', baseOptions)).toEqual({
             type: 'open_run_ide',
