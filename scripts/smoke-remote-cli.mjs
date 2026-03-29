@@ -2,7 +2,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { execa } from 'execa';
-import { resolveRemoteDispatch } from '../utils/dispatch.js';
+import { extractRemoteSessionTarget, resolveRemoteDispatch } from '../utils/dispatch.js';
 import { createSessionState, appendRunHistory } from '../utils/session-state.js';
 import { listDirectoryNodes } from '../utils/actions.js';
 import { prepareSessionWorkspace } from '../utils/workspace-sessions.js';
@@ -108,6 +108,7 @@ async function main() {
     const sessionDispatch = resolveRemoteDispatch('session research', baseOptions);
     const permissionDispatch = resolveRemoteDispatch('mode permission strict', baseOptions);
     const serviceDispatch = resolveRemoteDispatch('status service', baseOptions);
+    const targetedSessionInput = extractRemoteSessionTarget('research: relance dernier run');
 
     assert(worktreeDispatch?.type === 'set_workspace_mode', 'workspace dispatch not detected');
     assert(reviewDispatch?.type === 'set_task_profile', 'profile dispatch not detected');
@@ -115,6 +116,7 @@ async function main() {
     assert(sessionDispatch?.type === 'set_session_slot', 'session dispatch not detected');
     assert(permissionDispatch?.type === 'set_permission_mode', 'permission dispatch not detected');
     assert(serviceDispatch?.type === 'show_service_menu', 'service dispatch not detected');
+    assert(targetedSessionInput?.slot === 'research', 'session target prefix not detected');
 
     let session = createSessionState({
         activeRepo: 'remote-demo',

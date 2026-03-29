@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { resolveRemoteDispatch } from '../utils/dispatch.js';
+import { extractRemoteSessionTarget, resolveRemoteDispatch } from '../utils/dispatch.js';
 
 describe('resolveRemoteDispatch', () => {
     const baseOptions = {
@@ -90,6 +90,18 @@ describe('resolveRemoteDispatch', () => {
         expect(resolveRemoteDispatch('session research', baseOptions)).toEqual({
             type: 'set_session_slot',
             value: 'research'
+        });
+    });
+
+    it('extracts explicit session targets from remote text', () => {
+        expect(extractRemoteSessionTarget('research: relance dernier run')).toEqual({
+            slot: 'research',
+            text: 'relance dernier run'
+        });
+
+        expect(extractRemoteSessionTarget('@verify ouvre ide')).toEqual({
+            slot: 'verify',
+            text: 'ouvre ide'
         });
     });
 

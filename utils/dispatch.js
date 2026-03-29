@@ -349,6 +349,30 @@ function wantsRefreshIdes(text) {
     return hasAny(text, ['refresh ide', 'rafraichis ide', 'rafraichir ide', 'scan ide', 'rescan ide']);
 }
 
+export function extractRemoteSessionTarget(rawText = '') {
+    const raw = (rawText || '').trim();
+    if (!raw) return null;
+
+    const patterns = [
+        /^(main|research|verify)\s*:\s*(.+)$/iu,
+        /^@(main|research|verify)\s+(.+)$/iu,
+        /^(?:session|slot)\s+(main|research|verify)\s*:\s*(.+)$/iu,
+        /^(?:dans|sur|in)\s+(main|research|verify)\s*:\s*(.+)$/iu
+    ];
+
+    for (const pattern of patterns) {
+        const match = raw.match(pattern);
+        if (match?.[1] && match?.[2]) {
+            return {
+                slot: foldText(match[1]),
+                text: match[2].trim()
+            };
+        }
+    }
+
+    return null;
+}
+
 export function resolveRemoteDispatch(rawText, {
     repos = [],
     availableClis = [],

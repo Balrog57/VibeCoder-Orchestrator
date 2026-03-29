@@ -36,7 +36,7 @@ import {
     Messages
 } from './utils/ui.js';
 import { t, normalizeLocale, languageName } from './utils/i18n.js';
-import { resolveRemoteDispatch } from './utils/dispatch.js';
+import { extractRemoteSessionTarget, resolveRemoteDispatch } from './utils/dispatch.js';
 import {
     createSessionState,
     ensureSessionState,
@@ -187,6 +187,14 @@ function permissionModeLabel(locale, permissionMode) {
 
 function sessionSlotLabel(locale, slot) {
     return t(locale, `session_slot_${slot || 'main'}`);
+}
+
+function withTargetSlotLabel(locale, label, slot, targeted = false) {
+    if (!targeted || !slot) {
+        return label;
+    }
+
+    return `[${sessionSlotLabel(locale, slot)}] ${label}`;
 }
 
 function executionModeLabel(locale, executionMode, requestedCli = null) {
@@ -1111,14 +1119,14 @@ function openIdeForRun(session, runIndex) {
     return { opened, normalizedIndex, run };
 }
 
-async function handleDispatchedCommand(chatId, dispatch, { source, feedback, uiContext }) {
+async function handleDispatchedCommand(chatId, dispatch, { source, feedback, uiContext, targetSlot = null, targeted = false }) {
     const session = getSession(chatId);
     const locale = session.locale || 'fr';
 
     setGuiDispatchState(chatId, {
         mode: 'local',
         source,
-        label: describeDispatch(locale, dispatch)
+        label: withTargetSlotLabel(locale, describeDispatch(locale, dispatch), targetSlot, targeted)
     });
 
     switch (dispatch.type) {
@@ -1481,7 +1489,12 @@ async function routeIncomingText(chatId, text, { source, feedback, uiContext }) 
         return;
     }
 
-    const dispatch = resolveRemoteDispatch(text, {
+    const targetedInput = extractRemoteSessionTarget(text);
+    const normalizedText = targetedInput?.text || text.trim();
+    const targetSlot = targetedInput?.slot ? switchSessionSlot(chatId, targetedInput.slot).sessionSlot : getSession(chatId).sessionSlot;
+    const locale = getSession(chatId).locale || 'fr';
+
+    const dispatch = resolveRemoteDispatch(normalizedText, {
         repos: await listRepos(BASE_PROG_PATH),
         availableClis: AVAILABLE_CLIS,
         availableIdes: AVAILABLE_IDES,
@@ -1489,16 +1502,27 @@ async function routeIncomingText(chatId, text, { source, feedback, uiContext }) 
     });
 
     if (dispatch) {
-        return handleDispatchedCommand(chatId, dispatch, { source, feedback, uiContext });
+        setGuiDispatchState(chatId, {
+            mode: 'local',
+            source,
+            label: withTargetSlotLabel(locale, describeDispatch(locale, dispatch), targetSlot, Boolean(targetedInput))
+        });
+        return handleDispatchedCommand(chatId, dispatch, {
+            source,
+            feedback,
+            uiContext,
+            targetSlot,
+            targeted: Boolean(targetedInput)
+        });
     }
 
     setGuiDispatchState(chatId, {
         mode: 'pipeline',
         source,
-        label: text.slice(0, 80)
+        label: withTargetSlotLabel(locale, normalizedText.slice(0, 80), targetSlot, Boolean(targetedInput))
     });
 
-    return processPipelineRequest(chatId, text, feedback);
+    return processPipelineRequest(chatId, normalizedText, feedback);
 }
 
 // Initialiser les CLI disponibles au démarrage
@@ -2534,10 +2558,13 @@ async function processPipelineRequest(chatId, text, feedback, options = {}) {
 
 // --- GESTION DES NOTES & PIPELINE HANDLER ---
 bot.on('text', async (ctx) => {
-    const session = getSession(ctx.chat.id);
+    const rawText = ctx.message.text.trim();
+    const targetedInput = extractRemoteSessionTarget(rawText);
+    const text = targetedInput?.text || rawText;
+    const session = targetedInput?.slot ? switchSessionSlot(ctx.chat.id, targetedInput.slot) : getSession(ctx.chat.id);
     const locale = session.locale || 'fr';
-    const text = ctx.message.text.trim();
     if (ctx.from && ctx.from.is_bot) return;
+    if (!text) return;
 
     if (session.state === "awaiting_repo_name") {
         const feedback = {
@@ -2595,11 +2622,14 @@ bot.on('text', async (ctx) => {
 // --- IPC ELECTRON ---
 ipcMain.on('message-from-gui', async (event, text) => {
     const chatId = MY_TELEGRAM_ID;
-    const session = getSession(chatId);
+    const rawText = text.trim();
+    const targetedInput = extractRemoteSessionTarget(rawText);
+    const normalizedText = targetedInput?.text || rawText;
+    const session = targetedInput?.slot ? switchSessionSlot(chatId, targetedInput.slot) : getSession(chatId);
     const locale = session.locale || 'fr';
+    if (!normalizedText) return;
 
     if (session.state === 'awaiting_repo_name') {
-        const trimmed = text.trim();
         const feedback = {
             reply: async (m) => notifyGUI('message-to-gui', { text: m }),
             sendInitialStatus: async (m) => notifyGUI('message-to-gui', { text: m }),
@@ -2607,17 +2637,17 @@ ipcMain.on('message-from-gui', async (event, text) => {
         };
         if (await maybeQueueRemotePermission(chatId, {
             action: 'create_repo',
-            payload: { repo: trimmed },
+            payload: { repo: normalizedText },
             source: 'gui',
             uiContext: createGuiMockContext(chatId),
             feedback
         })) {
             return;
         }
-        const res = await createNewRepo(BASE_PROG_PATH, trimmed, session.browserPath || '');
+        const res = await createNewRepo(BASE_PROG_PATH, normalizedText, session.browserPath || '');
         if (res.success) {
             const nextSession = updateSession(chatId, current => setSessionState(current, 'idle', {
-                activeRepo: res.relativePath || trimmed,
+                activeRepo: res.relativePath || normalizedText,
                 browserPath: res.relativePath || current.browserPath,
                 workspacePath: null,
                 workspaceStatus: getDefaultWorkspaceStatus(current.workspaceMode),
@@ -2633,7 +2663,7 @@ ipcMain.on('message-from-gui', async (event, text) => {
 
     if (session.awaitingNotesInput) {
         const nextSession = updateSession(chatId, current => setSessionState(current, 'idle', {
-            saveNotes: text.trim(),
+            saveNotes: normalizedText,
             awaitingNotesInput: false
         }));
         notifyGUI('message-to-gui', { text: t(locale, 'notes_updated', { notes: nextSession.saveNotes }) });
@@ -2645,7 +2675,7 @@ ipcMain.on('message-from-gui', async (event, text) => {
         sendInitialStatus: async (m) => notifyGUI('status-update', { text: m }),
         sendUpdate: async (m) => notifyGUI('status-update', { text: m })
     };
-    await routeIncomingText(chatId, text.trim(), {
+    await routeIncomingText(chatId, normalizedText, {
         source: 'gui',
         feedback,
         uiContext: createGuiMockContext(chatId)
