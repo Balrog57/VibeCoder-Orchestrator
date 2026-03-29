@@ -199,6 +199,30 @@ function extractRunDetailIndex(rawText) {
     return parsed - 1;
 }
 
+function extractRerunIndex(rawText) {
+    const match = rawText.match(/(?:relance|relancer|rerun|retry)\s+(?:le\s+)?run\s+(\d+)/iu);
+    if (!match?.[1]) return null;
+
+    const parsed = Number.parseInt(match[1], 10);
+    if (!Number.isFinite(parsed) || parsed < 1) {
+        return null;
+    }
+
+    return parsed - 1;
+}
+
+function extractOpenRunIdeIndex(rawText) {
+    const match = rawText.match(/(?:ouvre|ouvrir|open|launch|lance|lancer)\s+(?:l\s*)?(?:ide|editor)\s+(?:du\s+)?run\s+(\d+)/iu);
+    if (!match?.[1]) return null;
+
+    const parsed = Number.parseInt(match[1], 10);
+    if (!Number.isFinite(parsed) || parsed < 1) {
+        return null;
+    }
+
+    return parsed - 1;
+}
+
 function wantsRefreshClis(text) {
     return hasAny(text, ['refresh cli', 'rafraichis cli', 'rafraichir cli', 'scan cli', 'rescan cli']);
 }
@@ -231,6 +255,11 @@ export function resolveRemoteDispatch(rawText, {
     const nextLanguage = extractLanguage(text);
     if (nextLanguage) {
         return { type: 'set_lang', value: nextLanguage };
+    }
+
+    const openRunIdeIndex = extractOpenRunIdeIndex(raw);
+    if (openRunIdeIndex !== null) {
+        return { type: 'open_run_ide', value: openRunIdeIndex };
     }
 
     const ideToOpen = extractOpenIde(text, availableIdes);
@@ -335,6 +364,11 @@ export function resolveRemoteDispatch(rawText, {
 
     if (wantsRerunLast(text)) {
         return { type: 'rerun_last' };
+    }
+
+    const rerunIndex = extractRerunIndex(raw);
+    if (rerunIndex !== null) {
+        return { type: 'rerun_run', value: rerunIndex };
     }
 
     const runDetailIndex = extractRunDetailIndex(raw);

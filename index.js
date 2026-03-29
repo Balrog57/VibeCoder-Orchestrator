@@ -277,20 +277,26 @@ function createRunsKeyboard(locale, session) {
 }
 
 function createRunDetailKeyboard(locale, session, runIndex = 0) {
-    const buttons = [];
+    const navButtons = [];
+    const actionButtons = [];
     const maxIndex = Math.max((session?.runHistory?.length || 1) - 1, 0);
 
     if (runIndex > 0) {
-        buttons.push(Markup.button.callback(t(locale, 'pager_prev'), `action:run_detail:${runIndex - 1}`));
+        navButtons.push(Markup.button.callback(t(locale, 'pager_prev'), `action:run_detail:${runIndex - 1}`));
     }
     if (runIndex < maxIndex) {
-        buttons.push(Markup.button.callback(t(locale, 'pager_next'), `action:run_detail:${runIndex + 1}`));
+        navButtons.push(Markup.button.callback(t(locale, 'pager_next'), `action:run_detail:${runIndex + 1}`));
     }
-    if (session?.lastPrompt) {
-        buttons.push(Markup.button.callback(t(locale, 'menu_rerun'), 'action:rerun_last'));
+    if (session?.runHistory?.[runIndex]) {
+        actionButtons.push(Markup.button.callback(t(locale, 'menu_rerun'), `action:rerun_run:${runIndex}`));
+        actionButtons.push(Markup.button.callback(t(locale, 'menu_run_open_ide'), `action:run_open_ide:${runIndex}`));
     }
-    buttons.push(Markup.button.callback(t(locale, 'menu_back'), 'action:runs'));
-    return Markup.inlineKeyboard([buttons]);
+    actionButtons.push(Markup.button.callback(t(locale, 'menu_back'), 'action:runs'));
+
+    const rows = [];
+    if (navButtons.length) rows.push(navButtons);
+    rows.push(actionButtons);
+    return Markup.inlineKeyboard(rows);
 }
 
 function createTelegramReplyContext(ctx, action = 'remote:text') {
@@ -354,6 +360,14 @@ function describeDispatch(locale, dispatch) {
             return dispatch.value !== undefined
                 ? `${t(locale, 'dispatch_intent_run_detail')} #${Number(dispatch.value) + 1}`
                 : t(locale, 'dispatch_intent_run_detail');
+        case 'rerun_run':
+            return dispatch.value !== undefined
+                ? `${t(locale, 'dispatch_intent_rerun_run')} #${Number(dispatch.value) + 1}`
+                : t(locale, 'dispatch_intent_rerun_run');
+        case 'open_run_ide':
+            return dispatch.value !== undefined
+                ? `${t(locale, 'dispatch_intent_open_run_ide')} #${Number(dispatch.value) + 1}`
+                : t(locale, 'dispatch_intent_open_run_ide');
         case 'show_memory':
             return t(locale, 'menu_memory');
         case 'show_history':
@@ -482,11 +496,18 @@ async function buildRunsOverview(chatId) {
     return `${t(locale, 'runs_title', { repo: escapeMd(session.activeRepo || t(locale, 'status_repo_none')) })}\n\n${lines.join('\n')}`;
 }
 
+function getRunEntry(session, runIndex = 0) {
+    const normalizedIndex = Number.isFinite(runIndex) ? Math.max(0, runIndex) : 0;
+    return {
+        normalizedIndex,
+        run: session.runHistory?.[normalizedIndex] || null
+    };
+}
+
 async function buildRunDetail(chatId, runIndex = 0) {
     const session = getSession(chatId);
     const locale = session.locale || 'fr';
-    const normalizedIndex = Number.isFinite(runIndex) ? Math.max(0, runIndex) : 0;
-    const run = session.runHistory?.[normalizedIndex];
+    const { normalizedIndex, run } = getRunEntry(session, runIndex);
 
     if (!run) {
         return t(locale, 'run_detail_none');
@@ -530,6 +551,35 @@ async function rerunLastRequest(chatId, feedback) {
 
     await feedback.reply(t(locale, 'rerun_started'));
     return processPipelineRequest(chatId, session.lastPrompt, feedback);
+}
+
+async function rerunRunRequest(chatId, runIndex, feedback) {
+    const session = getSession(chatId);
+    const locale = session.locale || 'fr';
+    const { normalizedIndex, run } = getRunEntry(session, runIndex);
+
+    if (!run?.prompt) {
+        await feedback.reply(t(locale, 'rerun_none'));
+        return;
+    }
+
+    await feedback.reply(t(locale, 'rerun_run_started', { index: normalizedIndex + 1 }));
+    return processPipelineRequest(chatId, run.prompt, feedback);
+}
+
+function openIdeForRun(session, runIndex) {
+    const { normalizedIndex, run } = getRunEntry(session, runIndex);
+    if (!run?.workspacePath) {
+        throw new Error(`Workspace indisponible pour le run ${normalizedIndex + 1}`);
+    }
+
+    const opened = launchIdeForRepo(run.workspacePath, {
+        preferredIde: session.defaultIde,
+        fallbackOrder: IDE_FALLBACK_ORDER,
+        disabledIdes: session.disabledIdes
+    });
+
+    return { opened, normalizedIndex, run };
 }
 
 async function handleDispatchedCommand(chatId, dispatch, { source, feedback, uiContext }) {
@@ -611,6 +661,9 @@ async function handleDispatchedCommand(chatId, dispatch, { source, feedback, uiC
         case 'rerun_last':
             await rerunLastRequest(chatId, feedback);
             return true;
+        case 'rerun_run':
+            await rerunRunRequest(chatId, dispatch.value ?? 0, feedback);
+            return true;
         case 'show_run_detail': {
             if (!session.activeRepo) {
                 await feedback.reply(t(locale, 'no_project'));
@@ -621,6 +674,20 @@ async function handleDispatchedCommand(chatId, dispatch, { source, feedback, uiC
                 parse_mode: 'Markdown',
                 ...createRunDetailKeyboard(locale, getSession(chatId), dispatch.value ?? 0)
             });
+            return true;
+        }
+        case 'open_run_ide': {
+            if (!session.activeRepo) {
+                await feedback.reply(t(locale, 'no_project'));
+                return true;
+            }
+
+            try {
+                const { opened } = openIdeForRun(session, dispatch.value ?? 0);
+                await feedback.reply(t(locale, 'ide_opened', { ide: opened.ide, repo: session.activeRepo }));
+            } catch (err) {
+                await feedback.reply(t(locale, 'ide_failed', { error: err.message }));
+            }
             return true;
         }
         case 'show_history': {
@@ -1056,6 +1123,8 @@ bot.command('runs', async ctx => {
 bot.command('rerun', async ctx => {
     const session = getSession(ctx.chat.id);
     const locale = session.locale || 'fr';
+    const tokens = ctx.message.text.trim().split(/\s+/);
+    const parsedIndex = tokens[1] ? Number.parseInt(tokens[1], 10) - 1 : null;
     const feedback = {
         reply: async (m) => ctx.reply(m, { parse_mode: 'Markdown' }),
         sendInitialStatus: async (m) => { await ctx.reply(m); },
@@ -1064,6 +1133,10 @@ bot.command('rerun', async ctx => {
 
     if (!session.activeRepo) {
         return ctx.reply(t(locale, 'no_project'), { parse_mode: 'Markdown' });
+    }
+
+    if (Number.isFinite(parsedIndex) && parsedIndex >= 0) {
+        return rerunRunRequest(ctx.chat.id, parsedIndex, feedback);
     }
 
     return rerunLastRequest(ctx.chat.id, feedback);
@@ -1302,6 +1375,19 @@ bot.action('action:rerun_last', async ctx => {
     await rerunLastRequest(ctx.chat.id, feedback);
 });
 
+bot.action(/action:rerun_run:(\d+)/, async ctx => {
+    const locale = getSession(ctx.chat.id).locale || 'fr';
+    const runIndex = Number.parseInt(ctx.match[1], 10);
+    const feedback = {
+        reply: async (m) => ctx.reply(m, { parse_mode: 'Markdown' }),
+        sendInitialStatus: async (m) => { await ctx.reply(m); },
+        sendUpdate: async (m) => { await ctx.reply(m); }
+    };
+
+    await ctx.answerCbQuery(`${t(locale, 'menu_rerun')} #${runIndex + 1}`);
+    await rerunRunRequest(ctx.chat.id, runIndex, feedback);
+});
+
 bot.action('action:run_detail', async ctx => {
     const session = getSession(ctx.chat.id);
     const locale = session.locale || 'fr';
@@ -1337,6 +1423,19 @@ bot.action(/action:run_detail:(\d+)/, async ctx => {
         ...createRunDetailKeyboard(locale, session, runIndex)
     });
     broadcastMenu(ctx.chat.id, createRunDetailKeyboard(locale, session, runIndex));
+});
+
+bot.action(/action:run_open_ide:(\d+)/, async ctx => {
+    const session = getSession(ctx.chat.id);
+    const locale = session.locale || 'fr';
+    const runIndex = Number.parseInt(ctx.match[1], 10);
+    try {
+        const { opened, normalizedIndex } = openIdeForRun(session, runIndex);
+        await ctx.answerCbQuery(`${t(locale, 'menu_run_open_ide')} #${normalizedIndex + 1}`);
+        await ctx.reply(t(locale, 'ide_opened', { ide: opened.ide, repo: session.activeRepo }), { parse_mode: 'Markdown' });
+    } catch (err) {
+        await ctx.reply(t(locale, 'ide_failed', { error: escapeMd(err.message) }), { parse_mode: 'Markdown' });
+    }
 });
 
 bot.action('action:memory', async ctx => {
@@ -1530,6 +1629,8 @@ async function processPipelineRequest(chatId, text, feedback) {
                 attempts: attempt,
                 taskProfile: activeTaskProfile.id,
                 workspaceMode: workspace.mode,
+                workspacePath: targetPath,
+                prompt: text,
                 promptSnippet: text,
                 detail: filesCreated.join(', '),
                 traces: latestRunTraces
@@ -1550,6 +1651,8 @@ async function processPipelineRequest(chatId, text, feedback) {
                 attempts: Math.max(attempt - 1, 1),
                 taskProfile: activeTaskProfile.id,
                 workspaceMode: workspace.mode,
+                workspacePath: targetPath,
+                prompt: text,
                 promptSnippet: text,
                 detail: testResult || errorMessage || 'Run failed',
                 traces: latestRunTraces
@@ -1565,6 +1668,8 @@ async function processPipelineRequest(chatId, text, feedback) {
             attempts: current.activeRun?.attempts || 0,
             taskProfile: activeTaskProfile.id,
             workspaceMode: workspace.mode,
+            workspacePath: targetPath,
+            prompt: text,
             promptSnippet: text,
             detail: e.message,
             traces: Array.isArray(e.traces) ? e.traces : []
@@ -1836,6 +1941,15 @@ ipcMain.on('gui-action', async (event, action) => {
         };
         return rerunLastRequest(chatId, feedback);
     }
+    if (action.startsWith('action:rerun_run:')) {
+        const feedback = {
+            reply: async (m) => notifyGUI('message-to-gui', { text: m }),
+            sendInitialStatus: async (m) => notifyGUI('status-update', { text: m }),
+            sendUpdate: async (m) => notifyGUI('status-update', { text: m })
+        };
+        const runIndex = Number.parseInt(action.split(':').pop(), 10);
+        return rerunRunRequest(chatId, runIndex, feedback);
+    }
     if (action === 'action:run_detail') {
         const locale = session.locale || 'fr';
         if (!session.activeRepo) {
@@ -1855,6 +1969,17 @@ ipcMain.on('gui-action', async (event, action) => {
         }
         notifyGUI('message-to-gui', { text: await buildRunDetail(chatId, runIndex) });
         notifyGUI('tiles-update', { tiles: createRunDetailKeyboard(locale, session, runIndex).reply_markup.inline_keyboard });
+        return;
+    }
+    if (action.startsWith('action:run_open_ide:')) {
+        const locale = session.locale || 'fr';
+        const runIndex = Number.parseInt(action.split(':').pop(), 10);
+        try {
+            const { opened } = openIdeForRun(session, runIndex);
+            notifyGUI('message-to-gui', { text: t(locale, 'ide_opened_short', { ide: opened.ide }) });
+        } catch (err) {
+            notifyGUI('message-to-gui', { text: t(locale, 'ide_failed', { error: err.message }) });
+        }
         return;
     }
     if (action === 'action:memory') {
