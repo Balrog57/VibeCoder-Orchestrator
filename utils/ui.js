@@ -25,9 +25,10 @@ export function createMainMenuKeyboard(session) {
             Markup.button.callback(t(locale, 'menu_memory'), 'action:memory')
         ],
         [
+            Markup.button.callback(t(locale, 'menu_sessions'), 'nav:sessions'),
             Markup.button.callback(t(locale, 'menu_settings'), 'nav:settings'),
             Markup.button.callback(t(locale, 'menu_help'), 'action:help')
-        ],
+        ]
     ]);
 }
 
@@ -111,6 +112,7 @@ export function createSettingsKeyboard(session) {
             Markup.button.callback(`IDE: ${session.defaultIde || t(locale, 'status_auto')}`, 'nav:ide'),
             Markup.button.callback(t(locale, 'menu_open_ide'), 'action:open_ide')
         ],
+        [Markup.button.callback(`${t(locale, 'settings_session_slot')}: ${t(locale, `session_slot_${session.sessionSlot || 'main'}`)}`, 'nav:sessions')],
         [Markup.button.callback(`${t(locale, 'settings_workspace_mode')}: ${t(locale, `workspace_mode_${session.workspaceMode || 'project'}`)}`, 'nav:workspace')],
         [Markup.button.callback(`${t(locale, 'settings_task_profile')}: ${t(locale, `task_profile_${session.taskProfile || 'code'}`)}`, 'nav:profile')],
         [Markup.button.callback(`${t(locale, 'settings_fallback_policy')}: ${session.fallbackMaxAttempts || 3}x`, 'nav:fallback')],
@@ -135,7 +137,7 @@ export function createWorkspaceModeKeyboard(session) {
 export function createTaskProfileKeyboard(session) {
     const locale = session.locale || 'fr';
     const currentProfile = session.taskProfile || 'code';
-    const buttons = ['code', 'review', 'fix', 'explore'].map(profile => {
+    const buttons = ['code', 'plan', 'review', 'fix', 'implement', 'explore', 'verify'].map(profile => {
         const prefix = currentProfile === profile ? 'ON' : 'SET';
         return [Markup.button.callback(`${prefix} ${t(locale, `task_profile_${profile}`)}`, `set_task_profile:${profile}`)];
     });
@@ -169,6 +171,18 @@ export function createFallbackKeyboard(session, availableClis = [], effectiveOrd
         Markup.button.callback(t(locale, 'menu_back'), 'nav:settings')
     ]);
 
+    return Markup.inlineKeyboard(rows);
+}
+
+export function createSessionSlotsKeyboard(session, slots = []) {
+    const locale = session.locale || 'fr';
+    const currentSlot = session.sessionSlot || 'main';
+    const rows = slots.map(slot => {
+        const prefix = currentSlot === slot ? 'ON' : 'OPEN';
+        return [Markup.button.callback(`${prefix} ${t(locale, `session_slot_${slot}`)}`, `set_session_slot:${slot}`)];
+    });
+
+    rows.push([Markup.button.callback(t(locale, 'menu_back'), 'nav:main')]);
     return Markup.inlineKeyboard(rows);
 }
 

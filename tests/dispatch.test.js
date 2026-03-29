@@ -63,6 +63,17 @@ describe('resolveRemoteDispatch', () => {
         });
     });
 
+    it('detects session cowork intents', () => {
+        expect(resolveRemoteDispatch('sessions', baseOptions)).toEqual({
+            type: 'show_sessions_menu'
+        });
+
+        expect(resolveRemoteDispatch('session research', baseOptions)).toEqual({
+            type: 'set_session_slot',
+            value: 'research'
+        });
+    });
+
     it('detects local runs overview intent', () => {
         expect(resolveRemoteDispatch('derniers runs', baseOptions)).toEqual({
             type: 'show_runs'

@@ -103,10 +103,12 @@ async function main() {
     const worktreeDispatch = resolveRemoteDispatch('utilise worktree', baseOptions);
     const reviewDispatch = resolveRemoteDispatch('mode review', baseOptions);
     const rerunDispatch = resolveRemoteDispatch('relance run 1 avec claude', baseOptions);
+    const sessionDispatch = resolveRemoteDispatch('session research', baseOptions);
 
     assert(worktreeDispatch?.type === 'set_workspace_mode', 'workspace dispatch not detected');
     assert(reviewDispatch?.type === 'set_task_profile', 'profile dispatch not detected');
     assert(rerunDispatch?.type === 'rerun_run_with_cli', 'rerun with cli dispatch not detected');
+    assert(sessionDispatch?.type === 'set_session_slot', 'session dispatch not detected');
 
     let session = createSessionState({
         activeRepo: 'remote-demo',
@@ -128,6 +130,7 @@ async function main() {
     const repoActions = callbackDataSet(repoMenu);
 
     assert(mainActions.has('nav:repos') && mainActions.has('action:code'), 'main menu tiles missing expected actions');
+    assert(mainActions.has('nav:sessions'), 'main menu tiles missing sessions action');
     assert(settingsActions.has('nav:workspace') && settingsActions.has('nav:profile'), 'settings tiles missing workspace/profile navigation');
     assert(settingsActions.has('nav:fallback'), 'settings tiles missing fallback navigation');
     assert(workspaceActions.has('set_workspace_mode:worktree'), 'workspace menu missing worktree action');

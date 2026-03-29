@@ -184,7 +184,7 @@ function extractWorkspaceMode(text) {
 
 function extractTaskProfile(text) {
     const isProfileCommand = hasAny(text, ['profil', 'profile', 'mode', 'utilise', 'utiliser', 'use ', 'switch']);
-    const candidates = ['review', 'fix', 'explore', 'code'];
+    const candidates = ['review', 'fix', 'explore', 'code', 'plan', 'implement', 'verify'];
     const match = candidates.find(candidate => text.includes(candidate));
 
     if (!match) return null;
@@ -193,6 +193,21 @@ function extractTaskProfile(text) {
     }
 
     return match;
+}
+
+function extractSessionSlot(text) {
+    const candidates = ['main', 'research', 'verify'];
+    const match = candidates.find(candidate => text.includes(candidate));
+    if (!match) return null;
+
+    if (
+        hasAny(text, ['session', 'slot', 'cowork', 'switch', 'passe', 'use ']) ||
+        matchCommand(text, candidates)
+    ) {
+        return match;
+    }
+
+    return null;
 }
 
 function extractFallbackAttempts(rawText) {
@@ -357,6 +372,11 @@ export function resolveRemoteDispatch(rawText, {
         return { type: 'set_workspace_mode', value: selectedWorkspaceMode };
     }
 
+    const selectedSessionSlot = extractSessionSlot(text);
+    if (selectedSessionSlot) {
+        return { type: 'set_session_slot', value: selectedSessionSlot };
+    }
+
     const fallbackAttempts = extractFallbackAttempts(raw);
     if (fallbackAttempts !== null) {
         return { type: 'set_fallback_attempts', value: fallbackAttempts };
@@ -393,6 +413,10 @@ export function resolveRemoteDispatch(rawText, {
         text.startsWith('liste des projets')
     ) {
         return { type: 'show_projects' };
+    }
+
+    if (matchCommand(text, ['sessions', 'session', 'cowork', 'parallel sessions'])) {
+        return { type: 'show_sessions_menu' };
     }
 
     if (matchCommand(text, ['config', 'configuration', 'cli config', 'config cli'])) {

@@ -26,6 +26,7 @@ import {
     createModelKeyboard,
     createIdeKeyboard,
     createLanguageKeyboard,
+    createSessionSlotsKeyboard,
     createTaskProfileKeyboard,
     createWorkspaceModeKeyboard,
     createFallbackKeyboard,
@@ -162,6 +163,10 @@ function workspaceStatusLabel(locale, session) {
 
 function taskProfileLabel(locale, taskProfile) {
     return t(locale, `task_profile_${taskProfile || 'code'}`);
+}
+
+function sessionSlotLabel(locale, slot) {
+    return t(locale, `session_slot_${slot || 'main'}`);
 }
 
 function executionModeLabel(locale, executionMode, requestedCli = null) {
@@ -302,29 +307,102 @@ let AVAILABLE_MODELS = {};    // { claude: [...], gemini: [...] }
 let FALLBACK_ORDER = [];      // Ordre de fallback dynamique
 let AVAILABLE_IDES = [];      // IDE détectés dynamiquement
 let IDE_FALLBACK_ORDER = [];  // Ordre de fallback des IDE
+const SESSION_SLOTS = ['main', 'research', 'verify'];
 
-function getSession(chatId) {
-    if (!sessions[chatId]) {
-        sessions[chatId] = createSessionState();
-    } else {
-        sessions[chatId] = ensureSessionState(sessions[chatId]);
+function normalizeSessionSlot(slot) {
+    return SESSION_SLOTS.includes(slot) ? slot : 'main';
+}
+
+function createSlotSession(templateSession, slot) {
+    const profileBySlot = {
+        main: templateSession?.taskProfile || 'code',
+        research: 'explore',
+        verify: 'verify'
+    };
+
+    return createSessionState({
+        activeRepo: templateSession?.activeRepo || null,
+        browserPath: templateSession?.browserPath || '',
+        locale: templateSession?.locale || 'fr',
+        workspaceMode: slot === 'main' ? (templateSession?.workspaceMode || 'project') : 'worktree',
+        defaultCli: templateSession?.defaultCli || null,
+        defaultModel: templateSession?.defaultModel || null,
+        defaultIde: templateSession?.defaultIde || null,
+        disabledClis: templateSession?.disabledClis || [],
+        disabledIdes: templateSession?.disabledIdes || [],
+        fallbackMaxAttempts: templateSession?.fallbackMaxAttempts || 3,
+        fallbackCliOrder: templateSession?.fallbackCliOrder || [],
+        taskProfile: profileBySlot[slot] || 'code'
+    });
+}
+
+function ensureSessionContainer(chatId) {
+    const current = sessions[chatId];
+    if (!current || current.sessionId) {
+        const mainSession = current ? ensureSessionState(current) : createSessionState();
+        sessions[chatId] = {
+            activeSlot: 'main',
+            slots: { main: mainSession }
+        };
     }
 
-    return sessions[chatId];
+    const container = sessions[chatId];
+    container.activeSlot = normalizeSessionSlot(container.activeSlot);
+    container.slots = container.slots && typeof container.slots === 'object' ? container.slots : {};
+    container.slots.main = container.slots.main ? ensureSessionState(container.slots.main) : createSessionState();
+    return container;
+}
+
+function getSession(chatId) {
+    const container = ensureSessionContainer(chatId);
+    const slot = container.activeSlot;
+
+    if (!container.slots[slot]) {
+        container.slots[slot] = createSlotSession(container.slots.main, slot);
+    } else {
+        container.slots[slot] = ensureSessionState(container.slots[slot]);
+    }
+
+    container.slots[slot].sessionSlot = slot;
+    return container.slots[slot];
 }
 
 function updateSession(chatId, updater) {
+    const container = ensureSessionContainer(chatId);
+    const slot = container.activeSlot;
     const current = getSession(chatId);
     const next = typeof updater === 'function'
         ? updater(current)
         : { ...current, ...updater };
-    sessions[chatId] = ensureSessionState(next);
+    container.slots[slot] = ensureSessionState(next);
     syncGuiSession(chatId);
-    return sessions[chatId];
+    return container.slots[slot];
+}
+
+function switchSessionSlot(chatId, slot) {
+    const container = ensureSessionContainer(chatId);
+    const nextSlot = normalizeSessionSlot(slot);
+    const templateSession = getSession(chatId);
+
+    if (!container.slots[nextSlot]) {
+        container.slots[nextSlot] = createSlotSession(templateSession, nextSlot);
+    }
+
+    container.activeSlot = nextSlot;
+    syncGuiSession(chatId);
+    return getSession(chatId);
 }
 
 function createBackKeyboard(locale, target = 'nav:main') {
     return Markup.inlineKeyboard([[Markup.button.callback(t(locale, 'menu_back'), target)]]);
+}
+
+function buildSessionMenuSummary(locale, session) {
+    return [
+        `${t(locale, 'sessions_repo')}: ${session.activeRepo || t(locale, 'status_repo_none')}`,
+        `${t(locale, 'sessions_profile')}: ${taskProfileLabel(locale, session.taskProfile)}`,
+        `${t(locale, 'sessions_workspace')}: ${workspaceModeLabel(locale, session.workspaceMode)}`
+    ].join(' | ');
 }
 
 function createRunsKeyboard(locale, session) {
@@ -414,6 +492,8 @@ function describeDispatch(locale, dispatch) {
             return t(locale, 'dispatch_intent_main');
         case 'show_projects':
             return t(locale, 'dispatch_intent_projects');
+        case 'show_sessions_menu':
+            return t(locale, 'dispatch_intent_sessions');
         case 'show_config':
             return t(locale, 'dispatch_intent_config');
         case 'show_settings':
@@ -478,6 +558,10 @@ function describeDispatch(locale, dispatch) {
             return t(locale, 'dispatch_intent_set_workspace_mode', {
                 mode: workspaceModeLabel(locale, dispatch.value)
             });
+        case 'set_session_slot':
+            return t(locale, 'dispatch_intent_set_session_slot', {
+                slot: sessionSlotLabel(locale, dispatch.value)
+            });
         case 'set_fallback_attempts':
             return t(locale, 'dispatch_intent_set_fallback_attempts', {
                 count: dispatch.value
@@ -514,6 +598,7 @@ function formatSessionStatusBlock(locale, session) {
 
     return [
         `**${t(locale, 'gui_monitor_title')}**`,
+        `${t(locale, 'settings_session_slot')}: ${sessionSlotLabel(locale, session.sessionSlot)}`,
         `${t(locale, 'settings_state')}: ${stateLabel(locale, session.state)}`,
         `${t(locale, 'settings_cli')}: ${session.defaultCli || t(locale, 'status_auto')}`,
         `${t(locale, 'config_model_current')}: ${session.defaultModel || t(locale, 'status_auto')}`,
@@ -718,6 +803,9 @@ async function handleDispatchedCommand(chatId, dispatch, { source, feedback, uiC
             updateSession(chatId, current => setSessionState(current, 'idle'));
             await showRepoSelection(uiContext, 0);
             return true;
+        case 'show_sessions_menu':
+            await showSessionMenu(uiContext);
+            return true;
         case 'show_config':
             await showConfigMenu(uiContext);
             return true;
@@ -912,6 +1000,10 @@ async function handleDispatchedCommand(chatId, dispatch, { source, feedback, uiC
                 workspaceFallbackReason: null
             }));
             await showWorkspaceModeMenu(uiContext);
+            return true;
+        case 'set_session_slot':
+            switchSessionSlot(chatId, dispatch.value);
+            await showSessionMenu(uiContext);
             return true;
         case 'set_fallback_attempts':
             updateSession(chatId, current => ({
@@ -1128,7 +1220,7 @@ async function showSettingsMenu(ctx) {
     const session = getSession(ctx.chat.id);
     syncGuiSession(ctx.chat.id);
     const locale = session.locale || 'fr';
-    const text = `${t(locale, 'settings_title')}\n\n${t(locale, 'settings_project')}: ${escapeMd(session.activeRepo) || t(locale, 'status_repo_none')}\n${t(locale, 'settings_cli')}: ${session.defaultCli || t(locale, 'status_auto')}\n${t(locale, 'settings_ide')}: ${session.defaultIde || t(locale, 'status_auto')}\n${t(locale, 'settings_task_profile')}: ${taskProfileLabel(locale, session.taskProfile)}\n${t(locale, 'settings_workspace_mode')}: ${workspaceModeLabel(locale, session.workspaceMode)}\n${t(locale, 'settings_fallback_policy')}: ${session.fallbackMaxAttempts || 3}x | ${formatFallbackOrder(session)}\n\n${formatSessionStatusBlock(locale, session)}`;
+    const text = `${t(locale, 'settings_title')}\n\n${t(locale, 'settings_session_slot')}: ${sessionSlotLabel(locale, session.sessionSlot)}\n${t(locale, 'settings_project')}: ${escapeMd(session.activeRepo) || t(locale, 'status_repo_none')}\n${t(locale, 'settings_cli')}: ${session.defaultCli || t(locale, 'status_auto')}\n${t(locale, 'settings_ide')}: ${session.defaultIde || t(locale, 'status_auto')}\n${t(locale, 'settings_task_profile')}: ${taskProfileLabel(locale, session.taskProfile)}\n${t(locale, 'settings_workspace_mode')}: ${workspaceModeLabel(locale, session.workspaceMode)}\n${t(locale, 'settings_fallback_policy')}: ${session.fallbackMaxAttempts || 3}x | ${formatFallbackOrder(session)}\n\n${formatSessionStatusBlock(locale, session)}`;
     const keyboard = createSettingsKeyboard(session);
     await ctx.editMessageText(text, { parse_mode: 'Markdown', ...keyboard });
     broadcastMenu(ctx.chat.id, keyboard);
@@ -1150,6 +1242,21 @@ async function showFallbackMenu(ctx) {
     const locale = session.locale || 'fr';
     const text = `${t(locale, 'fallback_title')}\n\n${t(locale, 'fallback_attempts_current')}: **${session.fallbackMaxAttempts || 3}x**\n${t(locale, 'fallback_order_current')}: ${formatFallbackOrder(session)}\n\n${t(locale, 'fallback_order_hint')}`;
     const keyboard = createFallbackKeyboard(session, AVAILABLE_CLIS, getEffectiveFallbackOrder(session));
+    await ctx.editMessageText(text, { parse_mode: 'Markdown', ...keyboard });
+    broadcastMenu(ctx.chat.id, keyboard);
+}
+
+async function showSessionMenu(ctx) {
+    const activeSession = getSession(ctx.chat.id);
+    const locale = activeSession.locale || 'fr';
+    const container = ensureSessionContainer(ctx.chat.id);
+    const lines = SESSION_SLOTS.map(slot => {
+        const session = container.slots[slot] ? ensureSessionState(container.slots[slot]) : createSlotSession(activeSession, slot);
+        const prefix = slot === container.activeSlot ? 'ON' : 'OFF';
+        return `${prefix} ${sessionSlotLabel(locale, slot)}\n${buildSessionMenuSummary(locale, session)}`;
+    });
+    const text = `${t(locale, 'sessions_title')}\n\n${t(locale, 'sessions_current')}: **${sessionSlotLabel(locale, container.activeSlot)}**\n\n${lines.join('\n\n')}`;
+    const keyboard = createSessionSlotsKeyboard(activeSession, SESSION_SLOTS);
     await ctx.editMessageText(text, { parse_mode: 'Markdown', ...keyboard });
     broadcastMenu(ctx.chat.id, keyboard);
 }
@@ -1223,6 +1330,15 @@ bot.command('workspace', async ctx => {
         editMessageText: async (text, extra) => ctx.reply(text, extra)
     };
     await showWorkspaceModeMenu(mockCtx);
+});
+
+bot.command('session', async ctx => {
+    const mockCtx = {
+        ...ctx,
+        callbackQuery: { data: 'nav:sessions' },
+        editMessageText: async (text, extra) => ctx.reply(text, extra)
+    };
+    await showSessionMenu(mockCtx);
 });
 
 bot.command('fallback', async ctx => {
@@ -1384,6 +1500,7 @@ bot.action('nav:repos', async ctx => {
 
 bot.action('nav:config', showConfigMenu);
 bot.action('nav:settings', showSettingsMenu);
+bot.action('nav:sessions', showSessionMenu);
 bot.action('nav:workspace', showWorkspaceModeMenu);
 bot.action('nav:fallback', showFallbackMenu);
 bot.action('nav:profile', showTaskProfileMenu);
@@ -1475,6 +1592,12 @@ bot.action(/set_workspace_mode:(.+)/, async ctx => {
     syncGuiSession(ctx.chat.id);
     await ctx.answerCbQuery(`${t(session.locale || 'fr', 'settings_workspace_mode')}: ${workspaceModeLabel(session.locale || 'fr', session.workspaceMode)}`);
     await showWorkspaceModeMenu(ctx);
+});
+
+bot.action(/set_session_slot:(.+)/, async ctx => {
+    const session = switchSessionSlot(ctx.chat.id, ctx.match[1]);
+    await ctx.answerCbQuery(`${t(session.locale || 'fr', 'settings_session_slot')}: ${sessionSlotLabel(session.locale || 'fr', session.sessionSlot)}`);
+    await showSessionMenu(ctx);
 });
 
 bot.action(/set_fallback_attempts:(\d+)/, async ctx => {
@@ -2032,6 +2155,7 @@ ipcMain.on('gui-action', async (event, action) => {
     if (action.startsWith('page:')) return showRepoSelection(mockCtx, parseInt(action.split(':')[1]));
     if (action === 'nav:config') return showConfigMenu(mockCtx);
     if (action === 'nav:settings') return showSettingsMenu(mockCtx);
+    if (action === 'nav:sessions') return showSessionMenu(mockCtx);
     if (action === 'nav:workspace') return showWorkspaceModeMenu(mockCtx);
     if (action === 'nav:fallback') return showFallbackMenu(mockCtx);
     if (action === 'nav:profile') return showTaskProfileMenu(mockCtx);
@@ -2102,6 +2226,10 @@ ipcMain.on('gui-action', async (event, action) => {
         session.workspaceFallbackReason = null;
         syncGuiSession(chatId);
         return showWorkspaceModeMenu(mockCtx);
+    }
+    if (action.startsWith('set_session_slot:')) {
+        switchSessionSlot(chatId, action.split(':')[1]);
+        return showSessionMenu(mockCtx);
     }
     if (action.startsWith('set_fallback_attempts:')) {
         session.fallbackMaxAttempts = Number.parseInt(action.split(':')[1], 10);
