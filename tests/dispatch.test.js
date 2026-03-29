@@ -63,6 +63,25 @@ describe('resolveRemoteDispatch', () => {
         });
     });
 
+    it('detects permission and service intents', () => {
+        expect(resolveRemoteDispatch('permissions', baseOptions)).toEqual({
+            type: 'show_permissions_menu'
+        });
+
+        expect(resolveRemoteDispatch('mode permission strict', baseOptions)).toEqual({
+            type: 'set_permission_mode',
+            value: 'strict'
+        });
+
+        expect(resolveRemoteDispatch('approve permission', baseOptions)).toEqual({
+            type: 'approve_permission'
+        });
+
+        expect(resolveRemoteDispatch('status service', baseOptions)).toEqual({
+            type: 'show_service_menu'
+        });
+    });
+
     it('detects session cowork intents', () => {
         expect(resolveRemoteDispatch('sessions', baseOptions)).toEqual({
             type: 'show_sessions_menu'

@@ -23,9 +23,8 @@ describe('session persistence', () => {
                     research: createSessionState({
                         activeRepo: 'demo-research',
                         taskProfile: 'explore',
-                        state: 'running_cli',
-                        isProcessing: true,
-                        activeRun: { id: 'run-1', prompt: 'inspecte ce repo' },
+                        state: 'waiting_permission',
+                        pendingPermission: { id: 'perm-1', action: 'open_ide', status: 'pending' },
                         workspaceMode: 'worktree'
                     })
                 }
@@ -39,9 +38,13 @@ describe('session persistence', () => {
         expect(restored['123'].activeSlot).toBe('research');
         expect(restored['123'].slots.main.activeRepo).toBe('demo-main');
         expect(restored['123'].slots.research.activeRepo).toBe('demo-research');
-        expect(restored['123'].slots.research.state).toBe('idle');
+        expect(restored['123'].slots.research.state).toBe('waiting_permission');
         expect(restored['123'].slots.research.isProcessing).toBe(false);
         expect(restored['123'].slots.research.activeRun).toBeNull();
         expect(restored['123'].slots.research.workspacePath).toBeNull();
+        expect(restored['123'].slots.research.pendingPermission).toMatchObject({
+            action: 'open_ide',
+            status: 'pending'
+        });
     });
 });

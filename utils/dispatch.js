@@ -195,6 +195,25 @@ function extractTaskProfile(text) {
     return match;
 }
 
+function extractPermissionMode(text) {
+    const isPermissionCommand = hasAny(text, ['permission', 'permissions', 'autorisation', 'autorisations', 'approval']);
+    if (!isPermissionCommand) return null;
+
+    if (hasAny(text, ['strict', 'verrouille', 'locked'])) {
+        return 'strict';
+    }
+
+    if (hasAny(text, ['confirm', 'confirmation', 'approval', 'demande'])) {
+        return 'confirm_remote';
+    }
+
+    if (text.includes('local')) {
+        return 'local';
+    }
+
+    return null;
+}
+
 function extractSessionSlot(text) {
     const candidates = ['main', 'research', 'verify'];
     const match = candidates.find(candidate => text.includes(candidate));
@@ -208,6 +227,25 @@ function extractSessionSlot(text) {
     }
 
     return null;
+}
+
+function wantsApprovePermission(text) {
+    return matchCommand(text, [
+        'approuve permission',
+        'approve permission',
+        'approve request',
+        'autorise action',
+        'confirme action'
+    ]);
+}
+
+function wantsDenyPermission(text) {
+    return matchCommand(text, [
+        'refuse permission',
+        'deny permission',
+        'deny request',
+        'bloque action'
+    ]);
 }
 
 function extractFallbackAttempts(rawText) {
@@ -372,6 +410,11 @@ export function resolveRemoteDispatch(rawText, {
         return { type: 'set_workspace_mode', value: selectedWorkspaceMode };
     }
 
+    const selectedPermissionMode = extractPermissionMode(text);
+    if (selectedPermissionMode) {
+        return { type: 'set_permission_mode', value: selectedPermissionMode };
+    }
+
     const selectedSessionSlot = extractSessionSlot(text);
     if (selectedSessionSlot) {
         return { type: 'set_session_slot', value: selectedSessionSlot };
@@ -431,8 +474,16 @@ export function resolveRemoteDispatch(rawText, {
         return { type: 'show_workspace_menu' };
     }
 
+    if (matchCommand(text, ['permissions', 'permission', 'autorisations', 'approvals'])) {
+        return { type: 'show_permissions_menu' };
+    }
+
     if (matchCommand(text, ['fallback', 'fallback policy', 'retry policy', 'politique fallback', 'retry settings'])) {
         return { type: 'show_fallback_menu' };
+    }
+
+    if (matchCommand(text, ['service', 'service status', 'status service', 'remote status', 'statut service'])) {
+        return { type: 'show_service_menu' };
     }
 
     if (matchCommand(text, ['profile', 'profil', 'profiles', 'profils', 'mode review', 'mode fix', 'mode explore'])) {
@@ -490,6 +541,14 @@ export function resolveRemoteDispatch(rawText, {
 
     if (matchCommand(text, ['save', 'sauvegarde', 'sauver', 'enregistre session'])) {
         return { type: 'manual_save' };
+    }
+
+    if (wantsApprovePermission(text)) {
+        return { type: 'approve_permission' };
+    }
+
+    if (wantsDenyPermission(text)) {
+        return { type: 'deny_permission' };
     }
 
     if (matchCommand(text, ['reset fallback', 'reset policy', 'reset retry', 'reset fallback policy'])) {

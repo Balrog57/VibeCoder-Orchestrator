@@ -21,6 +21,8 @@ describe('session state helpers', () => {
         expect(session.taskProfile).toBe('code');
         expect(session.fallbackMaxAttempts).toBe(3);
         expect(session.fallbackCliOrder).toEqual([]);
+        expect(session.permissionMode).toBe('local');
+        expect(session.pendingPermission).toBeNull();
     });
 
     it('repairs a partial session and normalizes invalid state', () => {
@@ -28,6 +30,7 @@ describe('session state helpers', () => {
         expect(session.state).toBe('idle');
         expect(session.disabledClis).toEqual([]);
         expect(session.workspaceMode).toBe('project');
+        expect(session.permissionMode).toBe('local');
     });
 
     it('tracks a run lifecycle and fallback attempts', () => {

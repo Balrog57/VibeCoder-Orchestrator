@@ -115,7 +115,9 @@ export function createSettingsKeyboard(session) {
         [Markup.button.callback(`${t(locale, 'settings_session_slot')}: ${t(locale, `session_slot_${session.sessionSlot || 'main'}`)}`, 'nav:sessions')],
         [Markup.button.callback(`${t(locale, 'settings_workspace_mode')}: ${t(locale, `workspace_mode_${session.workspaceMode || 'project'}`)}`, 'nav:workspace')],
         [Markup.button.callback(`${t(locale, 'settings_task_profile')}: ${t(locale, `task_profile_${session.taskProfile || 'code'}`)}`, 'nav:profile')],
+        [Markup.button.callback(`${t(locale, 'settings_permission_mode')}: ${t(locale, `permission_mode_${session.permissionMode || 'local'}`)}`, 'nav:permissions')],
         [Markup.button.callback(`${t(locale, 'settings_fallback_policy')}: ${session.fallbackMaxAttempts || 3}x`, 'nav:fallback')],
+        [Markup.button.callback(t(locale, 'menu_service'), 'nav:service')],
         [Markup.button.callback(`Notes: ${session.saveNotes || '-'}`, 'action:set_notes')],
         [Markup.button.callback(t(locale, 'menu_language', { lang }), 'nav:language')],
         [Markup.button.callback(t(locale, 'menu_back'), 'nav:main')]
@@ -174,6 +176,25 @@ export function createFallbackKeyboard(session, availableClis = [], effectiveOrd
     return Markup.inlineKeyboard(rows);
 }
 
+export function createPermissionKeyboard(session) {
+    const locale = session.locale || 'fr';
+    const currentMode = session.permissionMode || 'local';
+    const rows = ['local', 'confirm_remote', 'strict'].map(mode => {
+        const prefix = currentMode === mode ? 'ON' : 'SET';
+        return [Markup.button.callback(`${prefix} ${t(locale, `permission_mode_${mode}`)}`, `set_permission_mode:${mode}`)];
+    });
+
+    if (session.pendingPermission) {
+        rows.push([
+            Markup.button.callback(t(locale, 'menu_confirm'), 'permission_approve'),
+            Markup.button.callback(t(locale, 'menu_cancel'), 'permission_deny')
+        ]);
+    }
+
+    rows.push([Markup.button.callback(t(locale, 'menu_back'), 'nav:settings')]);
+    return Markup.inlineKeyboard(rows);
+}
+
 export function createSessionSlotsKeyboard(session, slots = []) {
     const locale = session.locale || 'fr';
     const currentSlot = session.sessionSlot || 'main';
@@ -184,6 +205,13 @@ export function createSessionSlotsKeyboard(session, slots = []) {
 
     rows.push([Markup.button.callback(t(locale, 'menu_back'), 'nav:main')]);
     return Markup.inlineKeyboard(rows);
+}
+
+export function createServiceKeyboard(locale = 'fr') {
+    return Markup.inlineKeyboard([
+        [Markup.button.callback(t(locale, 'menu_refresh'), 'nav:service')],
+        [Markup.button.callback(t(locale, 'menu_back'), 'nav:settings')]
+    ]);
 }
 
 export function createIdeKeyboard(session, availableIdes) {

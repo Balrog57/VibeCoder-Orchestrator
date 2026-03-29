@@ -8,7 +8,9 @@ import { listDirectoryNodes } from '../utils/actions.js';
 import { prepareSessionWorkspace } from '../utils/workspace-sessions.js';
 import {
     createMainMenuKeyboard,
+    createPermissionKeyboard,
     createRepoKeyboard,
+    createServiceKeyboard,
     createSettingsKeyboard,
     createTaskProfileKeyboard,
     createWorkspaceModeKeyboard
@@ -104,11 +106,15 @@ async function main() {
     const reviewDispatch = resolveRemoteDispatch('mode review', baseOptions);
     const rerunDispatch = resolveRemoteDispatch('relance run 1 avec claude', baseOptions);
     const sessionDispatch = resolveRemoteDispatch('session research', baseOptions);
+    const permissionDispatch = resolveRemoteDispatch('mode permission strict', baseOptions);
+    const serviceDispatch = resolveRemoteDispatch('status service', baseOptions);
 
     assert(worktreeDispatch?.type === 'set_workspace_mode', 'workspace dispatch not detected');
     assert(reviewDispatch?.type === 'set_task_profile', 'profile dispatch not detected');
     assert(rerunDispatch?.type === 'rerun_run_with_cli', 'rerun with cli dispatch not detected');
     assert(sessionDispatch?.type === 'set_session_slot', 'session dispatch not detected');
+    assert(permissionDispatch?.type === 'set_permission_mode', 'permission dispatch not detected');
+    assert(serviceDispatch?.type === 'show_service_menu', 'service dispatch not detected');
 
     let session = createSessionState({
         activeRepo: 'remote-demo',
@@ -121,20 +127,27 @@ async function main() {
     const settingsMenu = createSettingsKeyboard(session);
     const workspaceMenu = createWorkspaceModeKeyboard(session);
     const profileMenu = createTaskProfileKeyboard(session);
+    const permissionMenu = createPermissionKeyboard(session);
+    const serviceMenu = createServiceKeyboard('fr');
     const repoMenu = await createRepoKeyboard(browserState, 0, 'fr');
 
     const mainActions = callbackDataSet(mainMenu);
     const settingsActions = callbackDataSet(settingsMenu);
     const workspaceActions = callbackDataSet(workspaceMenu);
     const profileActions = callbackDataSet(profileMenu);
+    const permissionActions = callbackDataSet(permissionMenu);
+    const serviceActions = callbackDataSet(serviceMenu);
     const repoActions = callbackDataSet(repoMenu);
 
     assert(mainActions.has('nav:repos') && mainActions.has('action:code'), 'main menu tiles missing expected actions');
     assert(mainActions.has('nav:sessions'), 'main menu tiles missing sessions action');
     assert(settingsActions.has('nav:workspace') && settingsActions.has('nav:profile'), 'settings tiles missing workspace/profile navigation');
     assert(settingsActions.has('nav:fallback'), 'settings tiles missing fallback navigation');
+    assert(settingsActions.has('nav:permissions') && settingsActions.has('nav:service'), 'settings tiles missing permissions/service navigation');
     assert(workspaceActions.has('set_workspace_mode:worktree'), 'workspace menu missing worktree action');
     assert(profileActions.has('set_task_profile:review'), 'profile menu missing review action');
+    assert(permissionActions.has('set_permission_mode:strict'), 'permission menu missing strict action');
+    assert(serviceActions.has('nav:service'), 'service menu missing refresh action');
     assert([...repoActions].some(action => action?.startsWith('browse:remote-demo')), 'repo browser missing remote-demo tile');
 
     const fallbackSession = createSessionState({
@@ -172,6 +185,7 @@ async function main() {
 
     console.log('[OK] dispatch text intents');
     console.log('[OK] remote control tiles');
+    console.log('[OK] permissions and service menus');
     if (worktreeResult) {
         console.log(`[OK] worktree ready: ${worktreeResult.executionPath}`);
     } else {

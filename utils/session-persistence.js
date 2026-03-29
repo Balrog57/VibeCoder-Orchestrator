@@ -8,12 +8,14 @@ const STORAGE_FILE = 'session-state.json';
 
 function sanitizeSession(session) {
     const normalized = ensureSessionState(session);
+    const nextState = normalized.pendingPermission ? 'waiting_permission' : 'idle';
+    const nextDispatchMode = normalized.pendingPermission ? 'local' : 'idle';
     return {
         ...normalized,
         isProcessing: false,
         activeRun: null,
-        state: 'idle',
-        dispatchMode: 'idle',
+        state: nextState,
+        dispatchMode: nextDispatchMode,
         workspacePath: null,
         workspaceStatus: getDefaultWorkspaceStatus(normalized.workspaceMode),
         workspaceFallbackReason: null

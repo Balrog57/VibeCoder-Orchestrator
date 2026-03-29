@@ -1,5 +1,6 @@
 import crypto from 'crypto';
 import { getDefaultWorkspaceStatus, normalizeWorkspaceMode } from './workspace-sessions.js';
+import { normalizePermissionMode } from './remote-permissions.js';
 
 export const SESSION_STATES = Object.freeze([
     'idle',
@@ -8,6 +9,7 @@ export const SESSION_STATES = Object.freeze([
     'awaiting_notes_input',
     'awaiting_prompt',
     'running_cli',
+    'waiting_permission',
     'fallback_retry',
     'review_ready',
     'failed'
@@ -21,6 +23,8 @@ const DEFAULT_STATE = Object.freeze({
     sessionMode: 'remote-cli',
     dispatchMode: 'idle',
     permissionMode: 'local',
+    pendingPermission: null,
+    permissionHistory: [],
     workspaceMode: 'project',
     workspacePath: null,
     workspaceStatus: 'project',
@@ -74,6 +78,7 @@ export function ensureSessionState(session = {}) {
 
     merged.sessionId = merged.sessionId || buildSessionId();
     merged.workspaceMode = normalizeWorkspaceMode(merged.workspaceMode);
+    merged.permissionMode = normalizePermissionMode(merged.permissionMode);
     merged.disabledClis = Array.isArray(merged.disabledClis) ? [...merged.disabledClis] : [];
     merged.disabledIdes = Array.isArray(merged.disabledIdes) ? [...merged.disabledIdes] : [];
     merged.fallbackCliOrder = Array.isArray(merged.fallbackCliOrder) ? [...merged.fallbackCliOrder] : [];
@@ -82,7 +87,9 @@ export function ensureSessionState(session = {}) {
         : 3;
     merged.lastFiles = Array.isArray(merged.lastFiles) ? [...merged.lastFiles] : [];
     merged.runHistory = Array.isArray(merged.runHistory) ? [...merged.runHistory] : [];
+    merged.permissionHistory = Array.isArray(merged.permissionHistory) ? [...merged.permissionHistory] : [];
     merged.activeRun = merged.activeRun ? { ...merged.activeRun } : null;
+    merged.pendingPermission = merged.pendingPermission ? { ...merged.pendingPermission } : null;
     merged.workspaceStatus = merged.workspaceStatus || getDefaultWorkspaceStatus(merged.workspaceMode);
     merged.workspacePath = merged.workspacePath || null;
     merged.workspaceFallbackReason = merged.workspaceFallbackReason || null;

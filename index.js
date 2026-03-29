@@ -30,6 +30,8 @@ import {
     createTaskProfileKeyboard,
     createWorkspaceModeKeyboard,
     createFallbackKeyboard,
+    createPermissionKeyboard,
+    createServiceKeyboard,
     createSettingsKeyboard,
     Messages
 } from './utils/ui.js';
@@ -47,6 +49,18 @@ import {
 import { getDefaultWorkspaceStatus, prepareSessionWorkspace } from './utils/workspace-sessions.js';
 import { getTaskProfile } from './utils/task-profiles.js';
 import { loadPersistedSessions, savePersistedSessions } from './utils/session-persistence.js';
+import {
+    normalizePermissionMode,
+    queueRemotePermission,
+    requiresRemotePermission,
+    resolveRemotePermission
+} from './utils/remote-permissions.js';
+import {
+    buildRuntimeServiceSnapshot,
+    createRuntimeServiceState,
+    loadRuntimeServiceState,
+    saveRuntimeServiceState
+} from './utils/runtime-service.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -78,6 +92,7 @@ function createWindow() {
 
     // Envoyer le status initial
     mainWindow.webContents.on('did-finish-load', () => {
+        setRuntimeChannels({ gui: true });
         syncGuiSession(MY_TELEGRAM_ID);
         setGuiDispatchState(MY_TELEGRAM_ID, { mode: 'idle', source: 'remote' });
         broadcastMenu(MY_TELEGRAM_ID);
@@ -166,6 +181,10 @@ function taskProfileLabel(locale, taskProfile) {
     return t(locale, `task_profile_${taskProfile || 'code'}`);
 }
 
+function permissionModeLabel(locale, permissionMode) {
+    return t(locale, `permission_mode_${permissionMode || 'local'}`);
+}
+
 function sessionSlotLabel(locale, slot) {
     return t(locale, `session_slot_${slot || 'main'}`);
 }
@@ -216,6 +235,54 @@ function buildTraceLabel(locale, trace) {
     return `${trace.cli} - ${fallbackReasonLabel(locale, trace.reason)}`;
 }
 
+function buildPermissionActionLabel(locale, pendingPermission) {
+    if (!pendingPermission?.action) {
+        return t(locale, 'permission_pending_none');
+    }
+
+    switch (pendingPermission.action) {
+        case 'open_run_ide':
+            return t(locale, 'permission_action_open_run_ide', {
+                index: Number(pendingPermission.payload?.runIndex ?? 0) + 1
+            });
+        case 'set_workspace_mode':
+            if (pendingPermission.payload?.mode === 'worktree') {
+                return t(locale, 'permission_action_set_workspace_mode_worktree');
+            }
+            break;
+        case 'create_repo':
+            return t(locale, 'permission_action_create_repo', {
+                repo: pendingPermission.payload?.repo || t(locale, 'status_repo_none')
+            });
+        case 'manual_save':
+            return t(locale, 'permission_action_manual_save');
+        default:
+            break;
+    }
+
+    return t(locale, `permission_action_${pendingPermission.action}`);
+}
+
+function buildPermissionTargetLabel(locale, pendingPermission) {
+    if (!pendingPermission?.payload) {
+        return t(locale, 'status_repo_none');
+    }
+
+    if (pendingPermission.payload.repo) {
+        return pendingPermission.payload.repo;
+    }
+
+    if (pendingPermission.payload.mode) {
+        return workspaceModeLabel(locale, pendingPermission.payload.mode);
+    }
+
+    if (pendingPermission.payload.ide) {
+        return pendingPermission.payload.ide;
+    }
+
+    return pendingPermission.payload.workspacePath || pendingPermission.payload.target || t(locale, 'status_repo_none');
+}
+
 function buildSessionMonitor(locale, session) {
     return {
         state: session.state,
@@ -248,6 +315,7 @@ function syncGuiSession(chatId) {
     notifyGUI('session-update', payload);
     notifyGUI('locale-update', payload);
     schedulePersistSessions();
+    schedulePersistRuntimeState(chatId, 'session-sync');
 }
 
 function setGuiDispatchState(chatId, { mode = 'idle', source = 'remote', label = '' } = {}) {
@@ -292,6 +360,39 @@ function schedulePersistSessions() {
     }, 200);
 }
 
+function setRuntimeChannels(nextChannels = {}) {
+    runtimeServiceState = {
+        ...runtimeServiceState,
+        channels: {
+            ...runtimeServiceState.channels,
+            ...nextChannels
+        }
+    };
+    schedulePersistRuntimeState(null, 'channel-update');
+}
+
+function schedulePersistRuntimeState(chatId = null, lastSource = 'runtime') {
+    if (persistRuntimeTimer) {
+        clearTimeout(persistRuntimeTimer);
+    }
+
+    persistRuntimeTimer = setTimeout(async () => {
+        persistRuntimeTimer = null;
+        try {
+            const activeSession = chatId !== null && chatId !== undefined ? getSession(chatId) : null;
+            runtimeServiceState = buildRuntimeServiceSnapshot(runtimeServiceState, {
+                sessions,
+                chatId: chatId !== null && chatId !== undefined ? String(chatId) : runtimeServiceState.lastActiveChatId,
+                activeSlot: activeSession?.sessionSlot || runtimeServiceState.lastActiveSlot,
+                lastSource
+            });
+            await saveRuntimeServiceState(REPO_PATH, runtimeServiceState);
+        } catch (error) {
+            console.warn('[Runtime] Persist failed:', error.message);
+        }
+    }, 200);
+}
+
 async function pushRuntimeStatus(chatId, feedback, text) {
     await feedback.sendUpdate(text);
     notifyGUI('status-update', { text });
@@ -326,6 +427,9 @@ let AVAILABLE_IDES = [];      // IDE détectés dynamiquement
 let IDE_FALLBACK_ORDER = [];  // Ordre de fallback des IDE
 const SESSION_SLOTS = ['main', 'research', 'verify'];
 let persistSessionsTimer = null;
+let persistRuntimeTimer = null;
+let runtimeServiceState = createRuntimeServiceState();
+let previousRuntimeServiceState = null;
 
 function normalizeSessionSlot(slot) {
     return SESSION_SLOTS.includes(slot) ? slot : 'main';
@@ -346,6 +450,7 @@ function createSlotSession(templateSession, slot) {
         defaultCli: templateSession?.defaultCli || null,
         defaultModel: templateSession?.defaultModel || null,
         defaultIde: templateSession?.defaultIde || null,
+        permissionMode: templateSession?.permissionMode || 'local',
         disabledClis: templateSession?.disabledClis || [],
         disabledIdes: templateSession?.disabledIdes || [],
         fallbackMaxAttempts: templateSession?.fallbackMaxAttempts || 3,
@@ -421,6 +526,54 @@ function buildSessionMenuSummary(locale, session) {
         `${t(locale, 'sessions_profile')}: ${taskProfileLabel(locale, session.taskProfile)}`,
         `${t(locale, 'sessions_workspace')}: ${workspaceModeLabel(locale, session.workspaceMode)}`
     ].join(' | ');
+}
+
+function buildPermissionsOverview(locale, session) {
+    const pendingPermission = session.pendingPermission;
+    const pendingLine = pendingPermission
+        ? [
+            `${t(locale, 'permission_request_action')}: ${buildPermissionActionLabel(locale, pendingPermission)}`,
+            `${t(locale, 'permission_request_source')}: ${t(locale, pendingPermission.source === 'telegram' ? 'dispatch_source_telegram' : pendingPermission.source === 'gui' ? 'dispatch_source_gui' : 'dispatch_source_remote')}`,
+            `${t(locale, 'permission_request_target')}: ${buildPermissionTargetLabel(locale, pendingPermission)}`,
+            `${t(locale, 'permission_request_created_at')}: ${pendingPermission.createdAt}`
+        ].join('\n')
+        : t(locale, 'permission_pending_none');
+
+    const historyHead = Array.isArray(session.permissionHistory) ? session.permissionHistory.slice(0, 2) : [];
+    const historyLine = historyHead.length
+        ? historyHead.map(entry => `${entry.status === 'approved' ? 'OK' : 'NO'} ${buildPermissionActionLabel(locale, entry)}`).join('\n')
+        : t(locale, 'permission_pending_none');
+
+    return `${t(locale, 'permissions_title')}\n\n${t(locale, 'permissions_current_mode')}: **${permissionModeLabel(locale, session.permissionMode)}**\n\n${t(locale, 'permissions_pending')}:\n${pendingLine}\n\n${t(locale, 'permissions_history')}:\n${historyLine}`;
+}
+
+function buildServiceStatusText(locale) {
+    const summary = runtimeServiceState.summary || {};
+    const channels = runtimeServiceState.channels || {};
+    const channelsLabel = [
+        `Telegram=${channels.telegram ? 'ON' : 'OFF'}`,
+        `GUI=${channels.gui ? 'ON' : 'OFF'}`
+    ].join(' | ');
+    const lastTarget = runtimeServiceState.lastActiveChatId
+        ? `${runtimeServiceState.lastActiveChatId}/${runtimeServiceState.lastActiveSlot || 'main'}`
+        : t(locale, 'status_repo_none');
+
+    return [
+        t(locale, 'service_title'),
+        '',
+        `${t(locale, 'service_status')}: **${runtimeServiceState.status || 'online'}**`,
+        `${t(locale, 'service_pid')}: ${runtimeServiceState.pid || process.pid}`,
+        `${t(locale, 'service_started_at')}: ${runtimeServiceState.startedAt || '-'}`,
+        `${t(locale, 'service_updated_at')}: ${runtimeServiceState.updatedAt || '-'}`,
+        `${t(locale, 'service_last_source')}: ${runtimeServiceState.lastSource || '-'}`,
+        `${t(locale, 'service_channels')}: ${channelsLabel}`,
+        `${t(locale, 'service_sessions')}: ${summary.chatCount || 0}`,
+        `${t(locale, 'service_slots')}: ${summary.slotCount || 0}`,
+        `${t(locale, 'service_active_repos')}: ${summary.activeRepoCount || 0}`,
+        `${t(locale, 'service_processing')}: ${summary.processingCount || 0}`,
+        `${t(locale, 'service_waiting_permissions')}: ${summary.waitingPermissionCount || 0}`,
+        `${t(locale, 'service_last_target')}: ${lastTarget}`
+    ].join('\n');
 }
 
 function createRunsKeyboard(locale, session) {
@@ -518,8 +671,12 @@ function describeDispatch(locale, dispatch) {
             return t(locale, 'dispatch_intent_settings');
         case 'show_workspace_menu':
             return t(locale, 'dispatch_intent_workspace_menu');
+        case 'show_permissions_menu':
+            return t(locale, 'dispatch_intent_permissions_menu');
         case 'show_fallback_menu':
             return t(locale, 'dispatch_intent_fallback_menu');
+        case 'show_service_menu':
+            return t(locale, 'dispatch_intent_service_menu');
         case 'show_profile_menu':
             return t(locale, 'dispatch_intent_profile_menu');
         case 'show_model_menu':
@@ -576,6 +733,10 @@ function describeDispatch(locale, dispatch) {
             return t(locale, 'dispatch_intent_set_workspace_mode', {
                 mode: workspaceModeLabel(locale, dispatch.value)
             });
+        case 'set_permission_mode':
+            return t(locale, 'dispatch_intent_set_permission_mode', {
+                mode: permissionModeLabel(locale, dispatch.value)
+            });
         case 'set_session_slot':
             return t(locale, 'dispatch_intent_set_session_slot', {
                 slot: sessionSlotLabel(locale, dispatch.value)
@@ -590,6 +751,10 @@ function describeDispatch(locale, dispatch) {
             });
         case 'reset_fallback_policy':
             return t(locale, 'dispatch_intent_reset_fallback_policy');
+        case 'approve_permission':
+            return t(locale, 'dispatch_intent_approve_permission');
+        case 'deny_permission':
+            return t(locale, 'dispatch_intent_deny_permission');
         case 'set_task_profile':
             return t(locale, 'dispatch_intent_set_task_profile', {
                 profile: taskProfileLabel(locale, dispatch.value)
@@ -613,6 +778,9 @@ function formatSessionStatusBlock(locale, session) {
     const lastTrace = session.lastTrace?.cli
         ? `${session.lastTrace.cli} - ${fallbackReasonLabel(locale, session.lastTrace.reason)}`
         : t(locale, 'gui_monitor_none');
+    const pendingPermission = session.pendingPermission
+        ? buildPermissionActionLabel(locale, session.pendingPermission)
+        : t(locale, 'permission_pending_none');
 
     return [
         `**${t(locale, 'gui_monitor_title')}**`,
@@ -621,10 +789,12 @@ function formatSessionStatusBlock(locale, session) {
         `${t(locale, 'settings_cli')}: ${session.defaultCli || t(locale, 'status_auto')}`,
         `${t(locale, 'config_model_current')}: ${session.defaultModel || t(locale, 'status_auto')}`,
         `${t(locale, 'settings_task_profile')}: ${taskProfileLabel(locale, session.taskProfile)}`,
+        `${t(locale, 'settings_permission_mode')}: ${permissionModeLabel(locale, session.permissionMode)}`,
         `${t(locale, 'settings_workspace_mode')}: ${workspaceModeLabel(locale, session.workspaceMode)}`,
         `${t(locale, 'settings_workspace_status')}: ${workspaceStatusLabel(locale, session)}`,
         `${t(locale, 'settings_fallback_policy')}: ${session.fallbackMaxAttempts || 3}x | ${formatFallbackOrder({ ...session, locale })}`,
         `${t(locale, 'settings_fallbacks')}: ${session.fallbackCount || 0}`,
+        `${t(locale, 'settings_pending_permission')}: ${pendingPermission}`,
         `${t(locale, 'settings_last_trace')}: ${lastTrace}`
     ].join('\n');
 }
@@ -639,6 +809,145 @@ async function resolveSessionWorkspace(chatId) {
         workspaceFallbackReason: workspace.fallbackReason || null
     }));
     return workspace;
+}
+
+async function maybeQueueRemotePermission(chatId, { action, payload = {}, source = 'remote', uiContext, feedback }) {
+    const session = getSession(chatId);
+    if (!requiresRemotePermission(session, action, payload)) {
+        return false;
+    }
+
+    const nextSession = updateSession(chatId, current => queueRemotePermission(current, {
+        action,
+        payload,
+        source
+    }));
+    const locale = nextSession.locale || 'fr';
+    const message = `${t(locale, 'permission_request_title')}\n\n${t(locale, 'permission_request_action')}: ${buildPermissionActionLabel(locale, nextSession.pendingPermission)}\n${t(locale, 'permission_request_source')}: ${t(locale, source === 'telegram' ? 'dispatch_source_telegram' : source === 'gui' ? 'dispatch_source_gui' : 'dispatch_source_remote')}\n${t(locale, 'permission_request_target')}: ${buildPermissionTargetLabel(locale, nextSession.pendingPermission)}`;
+    const keyboard = createPermissionKeyboard(nextSession);
+
+    if (uiContext?.reply) {
+        await uiContext.reply(message, {
+            parse_mode: 'Markdown',
+            ...keyboard
+        });
+        broadcastMenu(chatId, keyboard);
+    } else if (feedback?.reply) {
+        await feedback.reply(message);
+    }
+
+    return true;
+}
+
+async function resolvePendingPermission(chatId, approved, { feedback, uiContext }) {
+    const session = getSession(chatId);
+    const locale = session.locale || 'fr';
+    if (!session.pendingPermission) {
+        if (feedback?.reply) {
+            await feedback.reply(t(locale, 'permission_pending_none'));
+        }
+        return false;
+    }
+
+    const pending = session.pendingPermission;
+    updateSession(chatId, current => resolveRemotePermission(current, approved));
+
+    if (!approved) {
+        if (feedback?.reply) {
+            await feedback.reply(t(locale, 'permission_denied'));
+        }
+        if (uiContext) {
+            await showPermissionsMenu(uiContext);
+        }
+        return true;
+    }
+
+    switch (pending.action) {
+        case 'set_workspace_mode':
+            updateSession(chatId, current => ({
+                ...current,
+                workspaceMode: pending.payload?.mode || current.workspaceMode,
+                workspacePath: null,
+                workspaceStatus: getDefaultWorkspaceStatus(pending.payload?.mode || current.workspaceMode),
+                workspaceFallbackReason: null
+            }));
+            if (feedback?.reply) {
+                await feedback.reply(t(locale, 'permission_approved'));
+            }
+            if (uiContext) {
+                await showWorkspaceModeMenu(uiContext);
+            }
+            return true;
+        case 'open_ide': {
+            if (!getSession(chatId).activeRepo) {
+                await feedback.reply(t(locale, 'no_project'));
+                return true;
+            }
+            const workspace = await resolveSessionWorkspace(chatId);
+            try {
+                const opened = launchIdeForRepo(workspace.executionPath, {
+                    preferredIde: pending.payload?.ide && pending.payload.ide !== 'auto'
+                        ? pending.payload.ide
+                        : getSession(chatId).defaultIde,
+                    fallbackOrder: IDE_FALLBACK_ORDER,
+                    disabledIdes: getSession(chatId).disabledIdes
+                });
+                if (workspace.status === 'fallback') {
+                    await feedback.reply(t(locale, 'workspace_fallback_line', {
+                        reason: workspaceFallbackReasonLabel(locale, workspace.fallbackReason)
+                    }));
+                }
+                await feedback.reply(t(locale, 'ide_opened', { ide: opened.ide, repo: getSession(chatId).activeRepo }));
+            } catch (err) {
+                await feedback.reply(t(locale, 'ide_failed', { error: err.message }));
+            }
+            return true;
+        }
+        case 'open_run_ide':
+            try {
+                const { opened } = openIdeForRun(getSession(chatId), pending.payload?.runIndex ?? 0);
+                await feedback.reply(t(locale, 'ide_opened', { ide: opened.ide, repo: getSession(chatId).activeRepo }));
+            } catch (err) {
+                await feedback.reply(t(locale, 'ide_failed', { error: err.message }));
+            }
+            return true;
+        case 'create_repo': {
+            const result = await createNewRepo(BASE_PROG_PATH, pending.payload?.repo, getSession(chatId).browserPath || '');
+            if (!result.success) {
+                await feedback.reply(t(locale, 'fatal_error', { error: result.error }));
+                return true;
+            }
+            const createdSession = updateSession(chatId, current => setSessionState(current, 'idle', {
+                activeRepo: result.relativePath || pending.payload?.repo,
+                browserPath: result.relativePath || current.browserPath,
+                workspacePath: null,
+                workspaceStatus: getDefaultWorkspaceStatus(current.workspaceMode),
+                workspaceFallbackReason: null
+            }));
+            if (uiContext?.reply) {
+                await uiContext.reply(t(locale, 'repo_ready', { repo: escapeMd(createdSession.activeRepo) }), {
+                    parse_mode: 'Markdown',
+                    ...createMainMenuKeyboard(createdSession)
+                });
+                broadcastMenu(chatId);
+            } else if (feedback?.reply) {
+                await feedback.reply(t(locale, 'repo_ready', { repo: escapeMd(createdSession.activeRepo) }));
+            }
+            return true;
+        }
+        case 'manual_save': {
+            const result = await manualSave(BASE_PROG_PATH, getSession(chatId));
+            if (!result.success) {
+                await feedback.reply(t(locale, 'save_failed', { error: result.error }));
+                return true;
+            }
+            await feedback.reply(t(locale, 'save_ok', { path: result.path }));
+            return true;
+        }
+        default:
+            await feedback.reply(t(locale, 'permission_approved'));
+            return true;
+    }
 }
 
 async function buildMemoryOverview(chatId) {
@@ -833,8 +1142,14 @@ async function handleDispatchedCommand(chatId, dispatch, { source, feedback, uiC
         case 'show_workspace_menu':
             await showWorkspaceModeMenu(uiContext);
             return true;
+        case 'show_permissions_menu':
+            await showPermissionsMenu(uiContext);
+            return true;
         case 'show_fallback_menu':
             await showFallbackMenu(uiContext);
+            return true;
+        case 'show_service_menu':
+            await showServiceMenu(uiContext);
             return true;
         case 'show_profile_menu':
             await showTaskProfileMenu(uiContext);
@@ -914,6 +1229,16 @@ async function handleDispatchedCommand(chatId, dispatch, { source, feedback, uiC
                 return true;
             }
 
+            if (await maybeQueueRemotePermission(chatId, {
+                action: 'open_run_ide',
+                payload: { runIndex: dispatch.value ?? 0 },
+                source,
+                uiContext,
+                feedback
+            })) {
+                return true;
+            }
+
             try {
                 const { opened } = openIdeForRun(session, dispatch.value ?? 0);
                 await feedback.reply(t(locale, 'ide_opened', { ide: opened.ide, repo: session.activeRepo }));
@@ -957,6 +1282,15 @@ async function handleDispatchedCommand(chatId, dispatch, { source, feedback, uiC
             broadcastMenu(chatId);
             return true;
         case 'create_repo': {
+            if (await maybeQueueRemotePermission(chatId, {
+                action: 'create_repo',
+                payload: { repo: dispatch.value },
+                source,
+                uiContext,
+                feedback
+            })) {
+                return true;
+            }
             const result = await createNewRepo(BASE_PROG_PATH, dispatch.value, session.browserPath || '');
             if (!result.success) {
                 await feedback.reply(t(locale, 'fatal_error', { error: result.error }));
@@ -1010,6 +1344,15 @@ async function handleDispatchedCommand(chatId, dispatch, { source, feedback, uiC
             return true;
         }
         case 'set_workspace_mode':
+            if (await maybeQueueRemotePermission(chatId, {
+                action: 'set_workspace_mode',
+                payload: { mode: dispatch.value },
+                source,
+                uiContext,
+                feedback
+            })) {
+                return true;
+            }
             updateSession(chatId, current => ({
                 ...current,
                 workspaceMode: dispatch.value,
@@ -1018,6 +1361,13 @@ async function handleDispatchedCommand(chatId, dispatch, { source, feedback, uiC
                 workspaceFallbackReason: null
             }));
             await showWorkspaceModeMenu(uiContext);
+            return true;
+        case 'set_permission_mode':
+            updateSession(chatId, current => ({
+                ...current,
+                permissionMode: normalizePermissionMode(dispatch.value)
+            }));
+            await showPermissionsMenu(uiContext);
             return true;
         case 'set_session_slot':
             switchSessionSlot(chatId, dispatch.value);
@@ -1055,6 +1405,16 @@ async function handleDispatchedCommand(chatId, dispatch, { source, feedback, uiC
                 return true;
             }
 
+            if (await maybeQueueRemotePermission(chatId, {
+                action: 'open_ide',
+                payload: { ide: dispatch.value || session.defaultIde || 'auto' },
+                source,
+                uiContext,
+                feedback
+            })) {
+                return true;
+            }
+
             const workspace = await resolveSessionWorkspace(chatId);
             try {
                 const opened = launchIdeForRepo(workspace.executionPath, {
@@ -1074,6 +1434,15 @@ async function handleDispatchedCommand(chatId, dispatch, { source, feedback, uiC
             return true;
         }
         case 'manual_save': {
+            if (await maybeQueueRemotePermission(chatId, {
+                action: 'manual_save',
+                payload: {},
+                source,
+                uiContext,
+                feedback
+            })) {
+                return true;
+            }
             const result = await manualSave(BASE_PROG_PATH, session);
             if (!result.success) {
                 await feedback.reply(t(locale, 'save_failed', { error: result.error }));
@@ -1082,6 +1451,12 @@ async function handleDispatchedCommand(chatId, dispatch, { source, feedback, uiC
             await feedback.reply(t(locale, 'save_ok', { path: result.path }));
             return true;
         }
+        case 'approve_permission':
+            await resolvePendingPermission(chatId, true, { feedback, uiContext });
+            return true;
+        case 'deny_permission':
+            await resolvePendingPermission(chatId, false, { feedback, uiContext });
+            return true;
         case 'set_notes_mode':
             updateSession(chatId, current => setSessionState(current, 'awaiting_notes_input', {
                 awaitingNotesInput: true
@@ -1238,7 +1613,7 @@ async function showSettingsMenu(ctx) {
     const session = getSession(ctx.chat.id);
     syncGuiSession(ctx.chat.id);
     const locale = session.locale || 'fr';
-    const text = `${t(locale, 'settings_title')}\n\n${t(locale, 'settings_session_slot')}: ${sessionSlotLabel(locale, session.sessionSlot)}\n${t(locale, 'settings_project')}: ${escapeMd(session.activeRepo) || t(locale, 'status_repo_none')}\n${t(locale, 'settings_cli')}: ${session.defaultCli || t(locale, 'status_auto')}\n${t(locale, 'settings_ide')}: ${session.defaultIde || t(locale, 'status_auto')}\n${t(locale, 'settings_task_profile')}: ${taskProfileLabel(locale, session.taskProfile)}\n${t(locale, 'settings_workspace_mode')}: ${workspaceModeLabel(locale, session.workspaceMode)}\n${t(locale, 'settings_fallback_policy')}: ${session.fallbackMaxAttempts || 3}x | ${formatFallbackOrder(session)}\n\n${formatSessionStatusBlock(locale, session)}`;
+    const text = `${t(locale, 'settings_title')}\n\n${t(locale, 'settings_session_slot')}: ${sessionSlotLabel(locale, session.sessionSlot)}\n${t(locale, 'settings_project')}: ${escapeMd(session.activeRepo) || t(locale, 'status_repo_none')}\n${t(locale, 'settings_cli')}: ${session.defaultCli || t(locale, 'status_auto')}\n${t(locale, 'settings_ide')}: ${session.defaultIde || t(locale, 'status_auto')}\n${t(locale, 'settings_task_profile')}: ${taskProfileLabel(locale, session.taskProfile)}\n${t(locale, 'settings_permission_mode')}: ${permissionModeLabel(locale, session.permissionMode)}\n${t(locale, 'settings_workspace_mode')}: ${workspaceModeLabel(locale, session.workspaceMode)}\n${t(locale, 'settings_fallback_policy')}: ${session.fallbackMaxAttempts || 3}x | ${formatFallbackOrder(session)}\n\n${formatSessionStatusBlock(locale, session)}`;
     const keyboard = createSettingsKeyboard(session);
     await ctx.editMessageText(text, { parse_mode: 'Markdown', ...keyboard });
     broadcastMenu(ctx.chat.id, keyboard);
@@ -1254,12 +1629,32 @@ async function showWorkspaceModeMenu(ctx) {
     broadcastMenu(ctx.chat.id, keyboard);
 }
 
+async function showPermissionsMenu(ctx) {
+    const session = getSession(ctx.chat.id);
+    syncGuiSession(ctx.chat.id);
+    const locale = session.locale || 'fr';
+    const text = buildPermissionsOverview(locale, session);
+    const keyboard = createPermissionKeyboard(session);
+    await ctx.editMessageText(text, { parse_mode: 'Markdown', ...keyboard });
+    broadcastMenu(ctx.chat.id, keyboard);
+}
+
 async function showFallbackMenu(ctx) {
     const session = getSession(ctx.chat.id);
     syncGuiSession(ctx.chat.id);
     const locale = session.locale || 'fr';
     const text = `${t(locale, 'fallback_title')}\n\n${t(locale, 'fallback_attempts_current')}: **${session.fallbackMaxAttempts || 3}x**\n${t(locale, 'fallback_order_current')}: ${formatFallbackOrder(session)}\n\n${t(locale, 'fallback_order_hint')}`;
     const keyboard = createFallbackKeyboard(session, AVAILABLE_CLIS, getEffectiveFallbackOrder(session));
+    await ctx.editMessageText(text, { parse_mode: 'Markdown', ...keyboard });
+    broadcastMenu(ctx.chat.id, keyboard);
+}
+
+async function showServiceMenu(ctx) {
+    const session = getSession(ctx.chat.id);
+    syncGuiSession(ctx.chat.id);
+    const locale = session.locale || 'fr';
+    const text = buildServiceStatusText(locale);
+    const keyboard = createServiceKeyboard(locale);
     await ctx.editMessageText(text, { parse_mode: 'Markdown', ...keyboard });
     broadcastMenu(ctx.chat.id, keyboard);
 }
@@ -1350,6 +1745,15 @@ bot.command('workspace', async ctx => {
     await showWorkspaceModeMenu(mockCtx);
 });
 
+bot.command('permissions', async ctx => {
+    const mockCtx = {
+        ...ctx,
+        callbackQuery: { data: 'nav:permissions' },
+        editMessageText: async (text, extra) => ctx.reply(text, extra)
+    };
+    await showPermissionsMenu(mockCtx);
+});
+
 bot.command('session', async ctx => {
     const mockCtx = {
         ...ctx,
@@ -1366,6 +1770,15 @@ bot.command('fallback', async ctx => {
         editMessageText: async (text, extra) => ctx.reply(text, extra)
     };
     await showFallbackMenu(mockCtx);
+});
+
+bot.command('status', async ctx => {
+    const mockCtx = {
+        ...ctx,
+        callbackQuery: { data: 'nav:service' },
+        editMessageText: async (text, extra) => ctx.reply(text, extra)
+    };
+    await showServiceMenu(mockCtx);
 });
 
 bot.command('profile', async ctx => {
@@ -1520,7 +1933,9 @@ bot.action('nav:config', showConfigMenu);
 bot.action('nav:settings', showSettingsMenu);
 bot.action('nav:sessions', showSessionMenu);
 bot.action('nav:workspace', showWorkspaceModeMenu);
+bot.action('nav:permissions', showPermissionsMenu);
 bot.action('nav:fallback', showFallbackMenu);
+bot.action('nav:service', showServiceMenu);
 bot.action('nav:profile', showTaskProfileMenu);
 bot.action('nav:model', showModelMenu);
 bot.action('nav:ide', showIdeMenu);
@@ -1603,13 +2018,32 @@ bot.action(/set_lang:(.+)/, async ctx => {
 
 bot.action(/set_workspace_mode:(.+)/, async ctx => {
     const session = getSession(ctx.chat.id);
-    session.workspaceMode = ctx.match[1];
+    const nextMode = ctx.match[1];
+    if (await maybeQueueRemotePermission(ctx.chat.id, {
+        action: 'set_workspace_mode',
+        payload: { mode: nextMode },
+        source: 'telegram',
+        uiContext: ctx,
+        feedback: { reply: async (message) => ctx.reply(message, { parse_mode: 'Markdown' }) }
+    })) {
+        await ctx.answerCbQuery(t(session.locale || 'fr', 'permissions_pending'));
+        return;
+    }
+    session.workspaceMode = nextMode;
     session.workspacePath = null;
     session.workspaceStatus = getDefaultWorkspaceStatus(session.workspaceMode);
     session.workspaceFallbackReason = null;
     syncGuiSession(ctx.chat.id);
     await ctx.answerCbQuery(`${t(session.locale || 'fr', 'settings_workspace_mode')}: ${workspaceModeLabel(session.locale || 'fr', session.workspaceMode)}`);
     await showWorkspaceModeMenu(ctx);
+});
+
+bot.action(/set_permission_mode:(.+)/, async ctx => {
+    const session = getSession(ctx.chat.id);
+    session.permissionMode = normalizePermissionMode(ctx.match[1]);
+    syncGuiSession(ctx.chat.id);
+    await ctx.answerCbQuery(`${t(session.locale || 'fr', 'settings_permission_mode')}: ${permissionModeLabel(session.locale || 'fr', session.permissionMode)}`);
+    await showPermissionsMenu(ctx);
 });
 
 bot.action(/set_session_slot:(.+)/, async ctx => {
@@ -1642,6 +2076,24 @@ bot.action('fallback_reset_policy', async ctx => {
     syncGuiSession(ctx.chat.id);
     await ctx.answerCbQuery(t(session.locale || 'fr', 'menu_reset_auto'));
     await showFallbackMenu(ctx);
+});
+
+bot.action('permission_approve', async ctx => {
+    const locale = getSession(ctx.chat.id).locale || 'fr';
+    await ctx.answerCbQuery(t(locale, 'menu_confirm'));
+    await resolvePendingPermission(ctx.chat.id, true, {
+        feedback: { reply: async (message) => ctx.reply(message, { parse_mode: 'Markdown' }) },
+        uiContext: ctx
+    });
+});
+
+bot.action('permission_deny', async ctx => {
+    const locale = getSession(ctx.chat.id).locale || 'fr';
+    await ctx.answerCbQuery(t(locale, 'menu_cancel'));
+    await resolvePendingPermission(ctx.chat.id, false, {
+        feedback: { reply: async (message) => ctx.reply(message, { parse_mode: 'Markdown' }) },
+        uiContext: ctx
+    });
 });
 
 bot.action(/set_task_profile:(.+)/, async ctx => {
@@ -1779,6 +2231,16 @@ bot.action(/action:run_open_ide:(\d+)/, async ctx => {
     const session = getSession(ctx.chat.id);
     const locale = session.locale || 'fr';
     const runIndex = Number.parseInt(ctx.match[1], 10);
+    if (await maybeQueueRemotePermission(ctx.chat.id, {
+        action: 'open_run_ide',
+        payload: { runIndex },
+        source: 'telegram',
+        uiContext: ctx,
+        feedback: { reply: async (message) => ctx.reply(message, { parse_mode: 'Markdown' }) }
+    })) {
+        await ctx.answerCbQuery(t(locale, 'permissions_pending'));
+        return;
+    }
     try {
         const { opened, normalizedIndex } = openIdeForRun(session, runIndex);
         await ctx.answerCbQuery(`${t(locale, 'menu_run_open_ide')} #${normalizedIndex + 1}`);
@@ -1823,6 +2285,17 @@ bot.action('action:open_ide', async ctx => {
     const locale = session.locale || 'fr';
     if (!session.activeRepo) {
         return ctx.answerCbQuery(t(locale, 'no_project'));
+    }
+
+    if (await maybeQueueRemotePermission(ctx.chat.id, {
+        action: 'open_ide',
+        payload: { ide: session.defaultIde || 'auto' },
+        source: 'telegram',
+        uiContext: ctx,
+        feedback: { reply: async (message) => ctx.reply(message, { parse_mode: 'Markdown' }) }
+    })) {
+        await ctx.answerCbQuery(t(locale, 'permissions_pending'));
+        return;
     }
 
     const workspace = await resolveSessionWorkspace(ctx.chat.id);
@@ -2067,6 +2540,20 @@ bot.on('text', async (ctx) => {
     if (ctx.from && ctx.from.is_bot) return;
 
     if (session.state === "awaiting_repo_name") {
+        const feedback = {
+            reply: async (m) => ctx.reply(m, { parse_mode: 'Markdown' }),
+            sendInitialStatus: async (m) => ctx.reply(m, { parse_mode: 'Markdown' }),
+            sendUpdate: async (m) => ctx.reply(m, { parse_mode: 'Markdown' })
+        };
+        if (await maybeQueueRemotePermission(ctx.chat.id, {
+            action: 'create_repo',
+            payload: { repo: text },
+            source: 'telegram',
+            uiContext: createTelegramReplyContext(ctx),
+            feedback
+        })) {
+            return;
+        }
         const res = await createNewRepo(BASE_PROG_PATH, text, session.browserPath || '');
         if (res.success) {
             const nextSession = updateSession(ctx.chat.id, current => setSessionState(current, 'idle', {
@@ -2110,6 +2597,39 @@ ipcMain.on('message-from-gui', async (event, text) => {
     const chatId = MY_TELEGRAM_ID;
     const session = getSession(chatId);
     const locale = session.locale || 'fr';
+
+    if (session.state === 'awaiting_repo_name') {
+        const trimmed = text.trim();
+        const feedback = {
+            reply: async (m) => notifyGUI('message-to-gui', { text: m }),
+            sendInitialStatus: async (m) => notifyGUI('message-to-gui', { text: m }),
+            sendUpdate: async (m) => notifyGUI('message-to-gui', { text: m })
+        };
+        if (await maybeQueueRemotePermission(chatId, {
+            action: 'create_repo',
+            payload: { repo: trimmed },
+            source: 'gui',
+            uiContext: createGuiMockContext(chatId),
+            feedback
+        })) {
+            return;
+        }
+        const res = await createNewRepo(BASE_PROG_PATH, trimmed, session.browserPath || '');
+        if (res.success) {
+            const nextSession = updateSession(chatId, current => setSessionState(current, 'idle', {
+                activeRepo: res.relativePath || trimmed,
+                browserPath: res.relativePath || current.browserPath,
+                workspacePath: null,
+                workspaceStatus: getDefaultWorkspaceStatus(current.workspaceMode),
+                workspaceFallbackReason: null
+            }));
+            notifyGUI('message-to-gui', { text: t(locale, 'repo_ready', { repo: nextSession.activeRepo }) });
+            broadcastMenu(chatId);
+            return;
+        }
+        notifyGUI('message-to-gui', { text: t(locale, 'fatal_error', { error: res.error }) });
+        return;
+    }
 
     if (session.awaitingNotesInput) {
         const nextSession = updateSession(chatId, current => setSessionState(current, 'idle', {
@@ -2175,7 +2695,9 @@ ipcMain.on('gui-action', async (event, action) => {
     if (action === 'nav:settings') return showSettingsMenu(mockCtx);
     if (action === 'nav:sessions') return showSessionMenu(mockCtx);
     if (action === 'nav:workspace') return showWorkspaceModeMenu(mockCtx);
+    if (action === 'nav:permissions') return showPermissionsMenu(mockCtx);
     if (action === 'nav:fallback') return showFallbackMenu(mockCtx);
+    if (action === 'nav:service') return showServiceMenu(mockCtx);
     if (action === 'nav:profile') return showTaskProfileMenu(mockCtx);
     if (action === 'nav:model') return showModelMenu(mockCtx);
     if (action === 'nav:ide') return showIdeMenu(mockCtx);
@@ -2238,12 +2760,27 @@ ipcMain.on('gui-action', async (event, action) => {
         return showLanguageMenu(mockCtx);
     }
     if (action.startsWith('set_workspace_mode:')) {
-        session.workspaceMode = action.split(':')[1];
+        const nextMode = action.split(':')[1];
+        if (await maybeQueueRemotePermission(chatId, {
+            action: 'set_workspace_mode',
+            payload: { mode: nextMode },
+            source: 'gui',
+            uiContext: mockCtx,
+            feedback: { reply: async (message) => notifyGUI('message-to-gui', { text: message }) }
+        })) {
+            return;
+        }
+        session.workspaceMode = nextMode;
         session.workspacePath = null;
         session.workspaceStatus = getDefaultWorkspaceStatus(session.workspaceMode);
         session.workspaceFallbackReason = null;
         syncGuiSession(chatId);
         return showWorkspaceModeMenu(mockCtx);
+    }
+    if (action.startsWith('set_permission_mode:')) {
+        session.permissionMode = normalizePermissionMode(action.split(':')[1]);
+        syncGuiSession(chatId);
+        return showPermissionsMenu(mockCtx);
     }
     if (action.startsWith('set_session_slot:')) {
         switchSessionSlot(chatId, action.split(':')[1]);
@@ -2266,6 +2803,18 @@ ipcMain.on('gui-action', async (event, action) => {
         syncGuiSession(chatId);
         return showFallbackMenu(mockCtx);
     }
+    if (action === 'permission_approve') {
+        return resolvePendingPermission(chatId, true, {
+            feedback: { reply: async (message) => notifyGUI('message-to-gui', { text: message }) },
+            uiContext: mockCtx
+        });
+    }
+    if (action === 'permission_deny') {
+        return resolvePendingPermission(chatId, false, {
+            feedback: { reply: async (message) => notifyGUI('message-to-gui', { text: message }) },
+            uiContext: mockCtx
+        });
+    }
     if (action.startsWith('set_task_profile:')) {
         session.taskProfile = action.split(':')[1];
         syncGuiSession(chatId);
@@ -2275,6 +2824,15 @@ ipcMain.on('gui-action', async (event, action) => {
         const locale = session.locale || 'fr';
         if (!session.activeRepo) {
             notifyGUI('message-to-gui', { text: t(locale, 'no_project') });
+            return;
+        }
+        if (await maybeQueueRemotePermission(chatId, {
+            action: 'open_ide',
+            payload: { ide: session.defaultIde || 'auto' },
+            source: 'gui',
+            uiContext: mockCtx,
+            feedback: { reply: async (message) => notifyGUI('message-to-gui', { text: message }) }
+        })) {
             return;
         }
         const workspace = await resolveSessionWorkspace(chatId);
@@ -2375,6 +2933,15 @@ ipcMain.on('gui-action', async (event, action) => {
     if (action.startsWith('action:run_open_ide:')) {
         const locale = session.locale || 'fr';
         const runIndex = Number.parseInt(action.split(':').pop(), 10);
+        if (await maybeQueueRemotePermission(chatId, {
+            action: 'open_run_ide',
+            payload: { runIndex },
+            source: 'gui',
+            uiContext: mockCtx,
+            feedback: { reply: async (message) => notifyGUI('message-to-gui', { text: message }) }
+        })) {
+            return;
+        }
         try {
             const { opened } = openIdeForRun(session, runIndex);
             notifyGUI('message-to-gui', { text: t(locale, 'ide_opened_short', { ide: opened.ide }) });
@@ -2411,12 +2978,20 @@ ipcMain.on('gui-action', async (event, action) => {
 async function init() {
     try {
         Object.assign(sessions, await loadPersistedSessions(REPO_PATH));
+        previousRuntimeServiceState = await loadRuntimeServiceState(REPO_PATH);
+        runtimeServiceState = createRuntimeServiceState({
+            restoredChats: Object.keys(sessions).length,
+            previousStartedAt: previousRuntimeServiceState?.startedAt || null,
+            previousUpdatedAt: previousRuntimeServiceState?.updatedAt || null
+        });
         await initAvailableClis();
         await initAvailableIdes();
         await initMemory(BASE_PROG_PATH);
         bot.launch();
+        setRuntimeChannels({ telegram: true });
         await app.whenReady();
         createWindow();
+        schedulePersistRuntimeState(MY_TELEGRAM_ID, 'init');
         app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
     } catch (e) { console.error(e); }
 }
