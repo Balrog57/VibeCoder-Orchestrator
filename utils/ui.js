@@ -113,6 +113,7 @@ export function createSettingsKeyboard(session) {
         ],
         [Markup.button.callback(`${t(locale, 'settings_workspace_mode')}: ${t(locale, `workspace_mode_${session.workspaceMode || 'project'}`)}`, 'nav:workspace')],
         [Markup.button.callback(`${t(locale, 'settings_task_profile')}: ${t(locale, `task_profile_${session.taskProfile || 'code'}`)}`, 'nav:profile')],
+        [Markup.button.callback(`${t(locale, 'settings_fallback_policy')}: ${session.fallbackMaxAttempts || 3}x`, 'nav:fallback')],
         [Markup.button.callback(`Notes: ${session.saveNotes || '-'}`, 'action:set_notes')],
         [Markup.button.callback(t(locale, 'menu_language', { lang }), 'nav:language')],
         [Markup.button.callback(t(locale, 'menu_back'), 'nav:main')]
@@ -141,6 +142,34 @@ export function createTaskProfileKeyboard(session) {
 
     buttons.push([Markup.button.callback(t(locale, 'menu_back'), 'nav:settings')]);
     return Markup.inlineKeyboard(buttons);
+}
+
+export function createFallbackKeyboard(session, availableClis = [], effectiveOrder = []) {
+    const locale = session.locale || 'fr';
+    const currentAttempts = session.fallbackMaxAttempts || 3;
+    const attemptButtons = [1, 2, 3, 4, 5].map(count =>
+        Markup.button.callback(
+            `${currentAttempts === count ? 'ON' : 'SET'} ${count}x`,
+            `set_fallback_attempts:${count}`
+        )
+    );
+
+    const cliButtons = availableClis.map(cli => {
+        const position = effectiveOrder.indexOf(cli);
+        const prefix = position >= 0 ? `${position + 1}` : '+';
+        return [Markup.button.callback(`${prefix} ${cli}`, `fallback_prioritize:${cli}`)];
+    });
+
+    const rows = [attemptButtons];
+    if (cliButtons.length) {
+        rows.push(...cliButtons);
+    }
+    rows.push([
+        Markup.button.callback(t(locale, 'menu_reset_auto'), 'fallback_reset_policy'),
+        Markup.button.callback(t(locale, 'menu_back'), 'nav:settings')
+    ]);
+
+    return Markup.inlineKeyboard(rows);
 }
 
 export function createIdeKeyboard(session, availableIdes) {

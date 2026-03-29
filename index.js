@@ -28,6 +28,7 @@ import {
     createLanguageKeyboard,
     createTaskProfileKeyboard,
     createWorkspaceModeKeyboard,
+    createFallbackKeyboard,
     createSettingsKeyboard,
     Messages
 } from './utils/ui.js';
@@ -127,6 +128,27 @@ function workspaceModeLabel(locale, mode) {
 
 function workspaceFallbackReasonLabel(locale, reason) {
     return t(locale, `workspace_fallback_reason_${reason || 'not_git_repository'}`);
+}
+
+function getEffectiveFallbackOrder(session) {
+    const customOrder = Array.isArray(session?.fallbackCliOrder) ? session.fallbackCliOrder : [];
+    const baseOrder = FALLBACK_ORDER.length ? FALLBACK_ORDER : AVAILABLE_CLIS;
+    const merged = [...customOrder, ...baseOrder].filter(Boolean);
+    return [...new Set(merged)].filter(cli => AVAILABLE_CLIS.includes(cli));
+}
+
+function formatFallbackOrder(session) {
+    const locale = session?.locale || 'fr';
+    const order = getEffectiveFallbackOrder(session);
+    return order.length ? order.join(' > ') : t(locale, 'status_auto');
+}
+
+function prioritizeFallbackCli(session, cli) {
+    const nextOrder = [cli, ...getEffectiveFallbackOrder(session).filter(item => item !== cli)];
+    return {
+        ...session,
+        fallbackCliOrder: nextOrder
+    };
 }
 
 function workspaceStatusLabel(locale, session) {
@@ -398,6 +420,8 @@ function describeDispatch(locale, dispatch) {
             return t(locale, 'dispatch_intent_settings');
         case 'show_workspace_menu':
             return t(locale, 'dispatch_intent_workspace_menu');
+        case 'show_fallback_menu':
+            return t(locale, 'dispatch_intent_fallback_menu');
         case 'show_profile_menu':
             return t(locale, 'dispatch_intent_profile_menu');
         case 'show_model_menu':
@@ -454,6 +478,16 @@ function describeDispatch(locale, dispatch) {
             return t(locale, 'dispatch_intent_set_workspace_mode', {
                 mode: workspaceModeLabel(locale, dispatch.value)
             });
+        case 'set_fallback_attempts':
+            return t(locale, 'dispatch_intent_set_fallback_attempts', {
+                count: dispatch.value
+            });
+        case 'prioritize_fallback_cli':
+            return t(locale, 'dispatch_intent_prioritize_fallback_cli', {
+                cli: dispatch.value
+            });
+        case 'reset_fallback_policy':
+            return t(locale, 'dispatch_intent_reset_fallback_policy');
         case 'set_task_profile':
             return t(locale, 'dispatch_intent_set_task_profile', {
                 profile: taskProfileLabel(locale, dispatch.value)
@@ -486,6 +520,7 @@ function formatSessionStatusBlock(locale, session) {
         `${t(locale, 'settings_task_profile')}: ${taskProfileLabel(locale, session.taskProfile)}`,
         `${t(locale, 'settings_workspace_mode')}: ${workspaceModeLabel(locale, session.workspaceMode)}`,
         `${t(locale, 'settings_workspace_status')}: ${workspaceStatusLabel(locale, session)}`,
+        `${t(locale, 'settings_fallback_policy')}: ${session.fallbackMaxAttempts || 3}x | ${formatFallbackOrder({ ...session, locale })}`,
         `${t(locale, 'settings_fallbacks')}: ${session.fallbackCount || 0}`,
         `${t(locale, 'settings_last_trace')}: ${lastTrace}`
     ].join('\n');
@@ -692,6 +727,9 @@ async function handleDispatchedCommand(chatId, dispatch, { source, feedback, uiC
         case 'show_workspace_menu':
             await showWorkspaceModeMenu(uiContext);
             return true;
+        case 'show_fallback_menu':
+            await showFallbackMenu(uiContext);
+            return true;
         case 'show_profile_menu':
             await showTaskProfileMenu(uiContext);
             return true;
@@ -874,6 +912,25 @@ async function handleDispatchedCommand(chatId, dispatch, { source, feedback, uiC
                 workspaceFallbackReason: null
             }));
             await showWorkspaceModeMenu(uiContext);
+            return true;
+        case 'set_fallback_attempts':
+            updateSession(chatId, current => ({
+                ...current,
+                fallbackMaxAttempts: dispatch.value
+            }));
+            await showFallbackMenu(uiContext);
+            return true;
+        case 'prioritize_fallback_cli':
+            updateSession(chatId, current => prioritizeFallbackCli(current, dispatch.value));
+            await showFallbackMenu(uiContext);
+            return true;
+        case 'reset_fallback_policy':
+            updateSession(chatId, current => ({
+                ...current,
+                fallbackMaxAttempts: 3,
+                fallbackCliOrder: []
+            }));
+            await showFallbackMenu(uiContext);
             return true;
         case 'set_task_profile':
             updateSession(chatId, current => ({
@@ -1071,7 +1128,7 @@ async function showSettingsMenu(ctx) {
     const session = getSession(ctx.chat.id);
     syncGuiSession(ctx.chat.id);
     const locale = session.locale || 'fr';
-    const text = `${t(locale, 'settings_title')}\n\n${t(locale, 'settings_project')}: ${escapeMd(session.activeRepo) || t(locale, 'status_repo_none')}\n${t(locale, 'settings_cli')}: ${session.defaultCli || t(locale, 'status_auto')}\n${t(locale, 'settings_ide')}: ${session.defaultIde || t(locale, 'status_auto')}\n${t(locale, 'settings_task_profile')}: ${taskProfileLabel(locale, session.taskProfile)}\n${t(locale, 'settings_workspace_mode')}: ${workspaceModeLabel(locale, session.workspaceMode)}\n\n${formatSessionStatusBlock(locale, session)}`;
+    const text = `${t(locale, 'settings_title')}\n\n${t(locale, 'settings_project')}: ${escapeMd(session.activeRepo) || t(locale, 'status_repo_none')}\n${t(locale, 'settings_cli')}: ${session.defaultCli || t(locale, 'status_auto')}\n${t(locale, 'settings_ide')}: ${session.defaultIde || t(locale, 'status_auto')}\n${t(locale, 'settings_task_profile')}: ${taskProfileLabel(locale, session.taskProfile)}\n${t(locale, 'settings_workspace_mode')}: ${workspaceModeLabel(locale, session.workspaceMode)}\n${t(locale, 'settings_fallback_policy')}: ${session.fallbackMaxAttempts || 3}x | ${formatFallbackOrder(session)}\n\n${formatSessionStatusBlock(locale, session)}`;
     const keyboard = createSettingsKeyboard(session);
     await ctx.editMessageText(text, { parse_mode: 'Markdown', ...keyboard });
     broadcastMenu(ctx.chat.id, keyboard);
@@ -1083,6 +1140,16 @@ async function showWorkspaceModeMenu(ctx) {
     const locale = session.locale || 'fr';
     const text = `${t(locale, 'workspace_title')}\n\n${t(locale, 'workspace_current_mode')}: **${workspaceModeLabel(locale, session.workspaceMode)}**\n${t(locale, 'workspace_current_status')}: ${workspaceStatusLabel(locale, session)}`;
     const keyboard = createWorkspaceModeKeyboard(session);
+    await ctx.editMessageText(text, { parse_mode: 'Markdown', ...keyboard });
+    broadcastMenu(ctx.chat.id, keyboard);
+}
+
+async function showFallbackMenu(ctx) {
+    const session = getSession(ctx.chat.id);
+    syncGuiSession(ctx.chat.id);
+    const locale = session.locale || 'fr';
+    const text = `${t(locale, 'fallback_title')}\n\n${t(locale, 'fallback_attempts_current')}: **${session.fallbackMaxAttempts || 3}x**\n${t(locale, 'fallback_order_current')}: ${formatFallbackOrder(session)}\n\n${t(locale, 'fallback_order_hint')}`;
+    const keyboard = createFallbackKeyboard(session, AVAILABLE_CLIS, getEffectiveFallbackOrder(session));
     await ctx.editMessageText(text, { parse_mode: 'Markdown', ...keyboard });
     broadcastMenu(ctx.chat.id, keyboard);
 }
@@ -1156,6 +1223,15 @@ bot.command('workspace', async ctx => {
         editMessageText: async (text, extra) => ctx.reply(text, extra)
     };
     await showWorkspaceModeMenu(mockCtx);
+});
+
+bot.command('fallback', async ctx => {
+    const mockCtx = {
+        ...ctx,
+        callbackQuery: { data: 'nav:fallback' },
+        editMessageText: async (text, extra) => ctx.reply(text, extra)
+    };
+    await showFallbackMenu(mockCtx);
 });
 
 bot.command('profile', async ctx => {
@@ -1309,6 +1385,7 @@ bot.action('nav:repos', async ctx => {
 bot.action('nav:config', showConfigMenu);
 bot.action('nav:settings', showSettingsMenu);
 bot.action('nav:workspace', showWorkspaceModeMenu);
+bot.action('nav:fallback', showFallbackMenu);
 bot.action('nav:profile', showTaskProfileMenu);
 bot.action('nav:model', showModelMenu);
 bot.action('nav:ide', showIdeMenu);
@@ -1398,6 +1475,32 @@ bot.action(/set_workspace_mode:(.+)/, async ctx => {
     syncGuiSession(ctx.chat.id);
     await ctx.answerCbQuery(`${t(session.locale || 'fr', 'settings_workspace_mode')}: ${workspaceModeLabel(session.locale || 'fr', session.workspaceMode)}`);
     await showWorkspaceModeMenu(ctx);
+});
+
+bot.action(/set_fallback_attempts:(\d+)/, async ctx => {
+    const session = getSession(ctx.chat.id);
+    const nextAttempts = Number.parseInt(ctx.match[1], 10);
+    session.fallbackMaxAttempts = nextAttempts;
+    syncGuiSession(ctx.chat.id);
+    await ctx.answerCbQuery(`${t(session.locale || 'fr', 'fallback_attempts_current')}: ${nextAttempts}x`);
+    await showFallbackMenu(ctx);
+});
+
+bot.action(/fallback_prioritize:(.+)/, async ctx => {
+    const cli = ctx.match[1];
+    const session = updateSession(ctx.chat.id, current => prioritizeFallbackCli(current, cli));
+    syncGuiSession(ctx.chat.id);
+    await ctx.answerCbQuery(`${t(session.locale || 'fr', 'settings_fallback_policy')}: ${cli}`);
+    await showFallbackMenu(ctx);
+});
+
+bot.action('fallback_reset_policy', async ctx => {
+    const session = getSession(ctx.chat.id);
+    session.fallbackMaxAttempts = 3;
+    session.fallbackCliOrder = [];
+    syncGuiSession(ctx.chat.id);
+    await ctx.answerCbQuery(t(session.locale || 'fr', 'menu_reset_auto'));
+    await showFallbackMenu(ctx);
 });
 
 bot.action(/set_task_profile:(.+)/, async ctx => {
@@ -1650,6 +1753,7 @@ async function processPipelineRequest(chatId, text, feedback, options = {}) {
         disabledClis: overrideCli
             ? session.disabledClis.filter(cli => cli !== overrideCli)
             : session.disabledClis,
+        preferredOrder: getEffectiveFallbackOrder(session),
         preferredCli: null,
         strictCli
     };
@@ -1683,7 +1787,7 @@ async function processPipelineRequest(chatId, text, feedback, options = {}) {
 
         const memoryContext = await queryMemory(BASE_PROG_PATH, text);
         let attempt = 1, success = false, errorMessage = null;
-        const MAX_ATTEMPTS = 3;
+        const MAX_ATTEMPTS = session.fallbackMaxAttempts || 3;
 
         while (attempt <= MAX_ATTEMPTS) {
             const status = t(locale, 'status_generating', { attempt, max: MAX_ATTEMPTS });
@@ -1929,6 +2033,7 @@ ipcMain.on('gui-action', async (event, action) => {
     if (action === 'nav:config') return showConfigMenu(mockCtx);
     if (action === 'nav:settings') return showSettingsMenu(mockCtx);
     if (action === 'nav:workspace') return showWorkspaceModeMenu(mockCtx);
+    if (action === 'nav:fallback') return showFallbackMenu(mockCtx);
     if (action === 'nav:profile') return showTaskProfileMenu(mockCtx);
     if (action === 'nav:model') return showModelMenu(mockCtx);
     if (action === 'nav:ide') return showIdeMenu(mockCtx);
@@ -1997,6 +2102,23 @@ ipcMain.on('gui-action', async (event, action) => {
         session.workspaceFallbackReason = null;
         syncGuiSession(chatId);
         return showWorkspaceModeMenu(mockCtx);
+    }
+    if (action.startsWith('set_fallback_attempts:')) {
+        session.fallbackMaxAttempts = Number.parseInt(action.split(':')[1], 10);
+        syncGuiSession(chatId);
+        return showFallbackMenu(mockCtx);
+    }
+    if (action.startsWith('fallback_prioritize:')) {
+        const cli = action.split(':')[1];
+        updateSession(chatId, current => prioritizeFallbackCli(current, cli));
+        syncGuiSession(chatId);
+        return showFallbackMenu(mockCtx);
+    }
+    if (action === 'fallback_reset_policy') {
+        session.fallbackMaxAttempts = 3;
+        session.fallbackCliOrder = [];
+        syncGuiSession(chatId);
+        return showFallbackMenu(mockCtx);
     }
     if (action.startsWith('set_task_profile:')) {
         session.taskProfile = action.split(':')[1];

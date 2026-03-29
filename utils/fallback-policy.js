@@ -77,7 +77,8 @@ export function assessExecutionResult(result) {
 export function buildCliExecutionPlan(configList, {
     defaultCli = null,
     disabledClis = [],
-    strictCli = false
+    strictCli = false,
+    preferredOrder = []
 } = {}) {
     const filtered = configList.filter(agent => !disabledClis.includes(agent.cmd));
 
@@ -93,15 +94,30 @@ export function buildCliExecutionPlan(configList, {
         return forced ? [forced] : [];
     }
 
+    let ordered = [...filtered];
+    if (Array.isArray(preferredOrder) && preferredOrder.length) {
+        const prioritized = [];
+        const seen = new Set();
+        for (const cliName of preferredOrder) {
+            const found = ordered.find(agent => agent.cmd === cliName);
+            if (found && !seen.has(found.cmd)) {
+                prioritized.push(found);
+                seen.add(found.cmd);
+            }
+        }
+        const remaining = ordered.filter(agent => !seen.has(agent.cmd));
+        ordered = [...prioritized, ...remaining];
+    }
+
     if (defaultCli && !disabledClis.includes(defaultCli)) {
-        const defaultIdx = filtered.findIndex(agent => agent.cmd === defaultCli);
+        const defaultIdx = ordered.findIndex(agent => agent.cmd === defaultCli);
         if (defaultIdx > 0) {
-            const [preferred] = filtered.splice(defaultIdx, 1);
-            filtered.unshift(preferred);
+            const [preferred] = ordered.splice(defaultIdx, 1);
+            ordered.unshift(preferred);
         }
     }
 
-    return filtered;
+    return ordered;
 }
 
 export function createFailureTrace(cli, failure, result, durationMs) {

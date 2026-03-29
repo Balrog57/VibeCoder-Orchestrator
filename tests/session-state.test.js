@@ -19,6 +19,8 @@ describe('session state helpers', () => {
         expect(session.workspaceMode).toBe('project');
         expect(session.workspaceStatus).toBe('project');
         expect(session.taskProfile).toBe('code');
+        expect(session.fallbackMaxAttempts).toBe(3);
+        expect(session.fallbackCliOrder).toEqual([]);
     });
 
     it('repairs a partial session and normalizes invalid state', () => {

@@ -195,6 +195,40 @@ function extractTaskProfile(text) {
     return match;
 }
 
+function extractFallbackAttempts(rawText) {
+    const match = rawText.match(/(?:tentatives?|attempts?|retry)\s*(?:max)?\s*(\d+)/iu);
+    if (!match?.[1]) return null;
+
+    const parsed = Number.parseInt(match[1], 10);
+    if (!Number.isFinite(parsed) || parsed < 1 || parsed > 5) {
+        return null;
+    }
+
+    return parsed;
+}
+
+function extractFallbackPriorityCli(rawText, availableClis) {
+    const cli = findMentionedChoice(rawText, availableClis);
+    if (!cli) return null;
+
+    const text = foldText(rawText);
+    if (
+        hasAny(text, ['priorise', 'prioritize', 'priorite', 'fallback']) &&
+        hasAny(text, [' first', ' premier', ' tete', 'priority', 'priorite', 'first'])
+    ) {
+        return cli;
+    }
+
+    if (
+        hasAny(text, ['priorise', 'prioritize', 'priorite', 'fallback']) &&
+        (text.includes(cli) || matchCommand(text, [foldText(cli)]))
+    ) {
+        return cli;
+    }
+
+    return null;
+}
+
 function wantsRerunLast(text) {
     return matchCommand(text, [
         'rerun',
@@ -323,6 +357,16 @@ export function resolveRemoteDispatch(rawText, {
         return { type: 'set_workspace_mode', value: selectedWorkspaceMode };
     }
 
+    const fallbackAttempts = extractFallbackAttempts(raw);
+    if (fallbackAttempts !== null) {
+        return { type: 'set_fallback_attempts', value: fallbackAttempts };
+    }
+
+    const fallbackPriorityCli = extractFallbackPriorityCli(raw, availableClis);
+    if (fallbackPriorityCli) {
+        return { type: 'prioritize_fallback_cli', value: fallbackPriorityCli };
+    }
+
     const selectedTaskProfile = extractTaskProfile(text);
     if (selectedTaskProfile) {
         return { type: 'set_task_profile', value: selectedTaskProfile };
@@ -361,6 +405,10 @@ export function resolveRemoteDispatch(rawText, {
 
     if (matchCommand(text, ['workspace', 'workspaces', 'isolation', 'mode isolation', 'workspace mode'])) {
         return { type: 'show_workspace_menu' };
+    }
+
+    if (matchCommand(text, ['fallback', 'fallback policy', 'retry policy', 'politique fallback', 'retry settings'])) {
+        return { type: 'show_fallback_menu' };
     }
 
     if (matchCommand(text, ['profile', 'profil', 'profiles', 'profils', 'mode review', 'mode fix', 'mode explore'])) {
@@ -418,6 +466,10 @@ export function resolveRemoteDispatch(rawText, {
 
     if (matchCommand(text, ['save', 'sauvegarde', 'sauver', 'enregistre session'])) {
         return { type: 'manual_save' };
+    }
+
+    if (matchCommand(text, ['reset fallback', 'reset policy', 'reset retry', 'reset fallback policy'])) {
+        return { type: 'reset_fallback_policy' };
     }
 
     if (

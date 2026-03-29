@@ -129,6 +129,7 @@ async function main() {
 
     assert(mainActions.has('nav:repos') && mainActions.has('action:code'), 'main menu tiles missing expected actions');
     assert(settingsActions.has('nav:workspace') && settingsActions.has('nav:profile'), 'settings tiles missing workspace/profile navigation');
+    assert(settingsActions.has('nav:fallback'), 'settings tiles missing fallback navigation');
     assert(workspaceActions.has('set_workspace_mode:worktree'), 'workspace menu missing worktree action');
     assert(profileActions.has('set_task_profile:review'), 'profile menu missing review action');
     assert([...repoActions].some(action => action?.startsWith('browse:remote-demo')), 'repo browser missing remote-demo tile');

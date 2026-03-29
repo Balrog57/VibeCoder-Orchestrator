@@ -41,6 +41,7 @@ export async function runVibeAgent(prompt, context, errorMessage = null, options
         defaultModel,
         preferredCli,
         disabledClis = [],
+        preferredOrder = [],
         strictCli = false,
         cwd = process.cwd(),
         taskProfile = 'code'
@@ -58,6 +59,7 @@ export async function runVibeAgent(prompt, context, errorMessage = null, options
         defaultCli: cliToUse,
         defaultModel,
         disabledClis,
+        preferredOrder,
         strictCli,
         cwd
     });
@@ -130,13 +132,14 @@ async function executeLimiter(prompt, configList, options = {}) {
         defaultCli = null,
         defaultModel = null,
         disabledClis = [],
+        preferredOrder = [],
         strictCli = false,
         cwd = process.cwd()
     } = options;
     let lastError = null;
     const traces = [];
 
-    const agentsToTry = buildCliExecutionPlan(configList, { defaultCli, disabledClis, strictCli });
+    const agentsToTry = buildCliExecutionPlan(configList, { defaultCli, disabledClis, preferredOrder, strictCli });
 
     if (agentsToTry.length === 0) {
         throw new Error('Aucun CLI disponible (tous desactives).');

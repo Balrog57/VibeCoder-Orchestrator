@@ -28,6 +28,15 @@ describe('fallback policy', () => {
         expect(plan.map(item => item.cmd)).toEqual(['claude']);
     });
 
+    it('applies a preferred fallback order when no CLI is forced', () => {
+        const plan = buildCliExecutionPlan(
+            [{ cmd: 'qwen' }, { cmd: 'claude' }, { cmd: 'gemini' }],
+            { preferredOrder: ['gemini', 'claude'] }
+        );
+
+        expect(plan.map(item => item.cmd)).toEqual(['gemini', 'claude', 'qwen']);
+    });
+
     it('detects recoverable failure reasons', () => {
         expect(classifyFailureReason('socket hang up', 1, false)).toBe('network_error');
         expect(classifyFailureReason('spawn ENOENT', null, false)).toBe('cli_unavailable');

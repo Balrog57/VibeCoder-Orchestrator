@@ -31,6 +31,8 @@ const DEFAULT_STATE = Object.freeze({
     defaultIde: null,
     disabledClis: [],
     disabledIdes: [],
+    fallbackMaxAttempts: 3,
+    fallbackCliOrder: [],
     isProcessing: false,
     awaitingNotesInput: false,
     lastPrompt: null,
@@ -74,6 +76,10 @@ export function ensureSessionState(session = {}) {
     merged.workspaceMode = normalizeWorkspaceMode(merged.workspaceMode);
     merged.disabledClis = Array.isArray(merged.disabledClis) ? [...merged.disabledClis] : [];
     merged.disabledIdes = Array.isArray(merged.disabledIdes) ? [...merged.disabledIdes] : [];
+    merged.fallbackCliOrder = Array.isArray(merged.fallbackCliOrder) ? [...merged.fallbackCliOrder] : [];
+    merged.fallbackMaxAttempts = Number.isFinite(merged.fallbackMaxAttempts)
+        ? Math.max(1, Math.min(5, Number(merged.fallbackMaxAttempts)))
+        : 3;
     merged.lastFiles = Array.isArray(merged.lastFiles) ? [...merged.lastFiles] : [];
     merged.runHistory = Array.isArray(merged.runHistory) ? [...merged.runHistory] : [];
     merged.activeRun = merged.activeRun ? { ...merged.activeRun } : null;

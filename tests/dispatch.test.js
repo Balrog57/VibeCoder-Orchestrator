@@ -47,6 +47,22 @@ describe('resolveRemoteDispatch', () => {
         });
     });
 
+    it('detects fallback policy intents', () => {
+        expect(resolveRemoteDispatch('fallback', baseOptions)).toEqual({
+            type: 'show_fallback_menu'
+        });
+
+        expect(resolveRemoteDispatch('tentatives 4', baseOptions)).toEqual({
+            type: 'set_fallback_attempts',
+            value: 4
+        });
+
+        expect(resolveRemoteDispatch('priorise codex', baseOptions)).toEqual({
+            type: 'prioritize_fallback_cli',
+            value: 'codex'
+        });
+    });
+
     it('detects local runs overview intent', () => {
         expect(resolveRemoteDispatch('derniers runs', baseOptions)).toEqual({
             type: 'show_runs'
