@@ -8,7 +8,6 @@
 </head>
 <body>
     <div id="app">
-        <!-- Avatar Section -->
         <div class="avatar-container">
             <div class="kawaii-cat" id="avatar">
                 <div class="ears"></div>
@@ -21,27 +20,71 @@
                     <div class="mouth"></div>
                 </div>
             </div>
-            <div class="status-bubble" id="status-text">Prêt à coder !</div>
+            <div class="status-bubble" id="status-text">Ready to code!</div>
         </div>
 
-        <!-- Chat Section -->
         <div class="chat-container">
             <div class="chat-header">
-                <h2>VibeRemote Chat</h2>
-                <div id="active-repo">📂 Aucun projet</div>
+                <div class="header-copy">
+                    <h2 id="chat-title">VibeRemote</h2>
+                    <div class="dispatch-row">
+                        <span class="dispatch-label" id="dispatch-title">Dispatch</span>
+                        <span class="dispatch-badge idle" id="dispatch-badge">Remote ready</span>
+                        <span class="dispatch-source" id="dispatch-source">Remote</span>
+                    </div>
+                </div>
+                <div id="active-repo">No active project</div>
             </div>
-            <div class="messages" id="messages-list">
-                <div class="message system">
-                    Bienvenue ! Sélectionnez un projet sur Telegram ou via les tuiles ci-dessous.
+
+            <div class="session-monitor" id="session-monitor">
+                <div class="session-monitor-title" id="session-monitor-title">Session</div>
+                <div class="session-monitor-grid">
+                    <div class="monitor-item">
+                        <span class="monitor-label" id="monitor-state-label">State</span>
+                        <span class="monitor-value" id="monitor-state-value">Idle</span>
+                    </div>
+                    <div class="monitor-item">
+                        <span class="monitor-label" id="monitor-cli-label">CLI</span>
+                        <span class="monitor-value" id="monitor-cli-value">Auto</span>
+                    </div>
+                    <div class="monitor-item">
+                        <span class="monitor-label" id="monitor-model-label">Model</span>
+                        <span class="monitor-value" id="monitor-model-value">Auto</span>
+                    </div>
+                    <div class="monitor-item">
+                        <span class="monitor-label" id="monitor-profile-label">Profile</span>
+                        <span class="monitor-value" id="monitor-profile-value">Code</span>
+                    </div>
+                    <div class="monitor-item">
+                        <span class="monitor-label" id="monitor-workspace-label">Workspace</span>
+                        <span class="monitor-value" id="monitor-workspace-value">Project folder</span>
+                    </div>
+                    <div class="monitor-item">
+                        <span class="monitor-label" id="monitor-fallbacks-label">Fallbacks</span>
+                        <span class="monitor-value" id="monitor-fallbacks-value">0</span>
+                    </div>
+                    <div class="monitor-item">
+                        <span class="monitor-label" id="monitor-attempts-label">Attempts</span>
+                        <span class="monitor-value" id="monitor-attempts-value">0</span>
+                    </div>
+                    <div class="monitor-item monitor-trace">
+                        <span class="monitor-label" id="monitor-last-trace-label">Last trace</span>
+                        <span class="monitor-value" id="monitor-last-trace-value">None</span>
+                    </div>
                 </div>
             </div>
-            
-            <!-- Tiles Container -->
+
+            <div class="messages" id="messages-list">
+                <div class="message system">
+                    Welcome! Select a project from Telegram or with the tiles below.
+                </div>
+            </div>
+
             <div id="tiles-container" class="tiles-grid"></div>
 
             <div class="input-area">
-                <input type="text" id="user-input" placeholder="Décrivez votre idée..." autofocus>
-                <button id="send-btn">Envoyer</button>
+                <input type="text" id="user-input" placeholder="Describe your idea..." autofocus>
+                <button id="send-btn">Send</button>
             </div>
         </div>
     </div>

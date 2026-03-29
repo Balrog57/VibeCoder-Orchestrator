@@ -1,0 +1,53 @@
+import { describe, expect, it } from 'vitest';
+import {
+    createSessionState,
+    ensureSessionState,
+    finishSessionRun,
+    recordFallback,
+    setSessionState,
+    startSessionRun
+} from '../utils/session-state.js';
+
+describe('session state helpers', () => {
+    it('creates a remote-cli session with stable defaults', () => {
+        const session = createSessionState();
+        expect(session.sessionMode).toBe('remote-cli');
+        expect(session.state).toBe('idle');
+        expect(session.sessionId).toBeTruthy();
+        expect(session.disabledClis).toEqual([]);
+        expect(session.workspaceMode).toBe('project');
+        expect(session.workspaceStatus).toBe('project');
+        expect(session.taskProfile).toBe('code');
+    });
+
+    it('repairs a partial session and normalizes invalid state', () => {
+        const session = ensureSessionState({ state: 'broken', disabledClis: null, workspaceMode: 'weird' });
+        expect(session.state).toBe('idle');
+        expect(session.disabledClis).toEqual([]);
+        expect(session.workspaceMode).toBe('project');
+    });
+
+    it('tracks a run lifecycle and fallback attempts', () => {
+        let session = createSessionState({ activeRepo: 'demo' });
+        session = setSessionState(session, 'awaiting_notes_input', { awaitingNotesInput: true });
+        expect(session.awaitingNotesInput).toBe(true);
+
+        session = startSessionRun(session, 'corrige les tests');
+        expect(session.state).toBe('running_cli');
+        expect(session.isProcessing).toBe(true);
+        expect(session.activeRun?.prompt).toBe('corrige les tests');
+
+        session = recordFallback(session, {
+            cli: 'claude',
+            status: 'failed',
+            reason: 'rate_limit'
+        });
+        expect(session.state).toBe('fallback_retry');
+        expect(session.fallbackCount).toBe(1);
+
+        session = finishSessionRun(session, { state: 'idle' });
+        expect(session.state).toBe('idle');
+        expect(session.isProcessing).toBe(false);
+        expect(session.activeRun).toBeNull();
+    });
+});

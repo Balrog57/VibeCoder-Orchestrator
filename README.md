@@ -5,6 +5,13 @@
 **Langage:** Node.js
 **Frameworks principaux:** Telegraf, Execa
 
+## Documentation
+
+- Voir [CAHIER_DES_CHARGES.md](./CAHIER_DES_CHARGES.md) pour la vision produit, le perimetre fonctionnel et les criteres d'acceptation.
+- Voir [BACKLOG_MVP.md](./BACKLOG_MVP.md) pour la priorisation MVP, les user stories et l'analyse des ecarts.
+- Voir [USER_STORIES_TACHES.md](./USER_STORIES_TACHES.md) pour le decoupage user stories -> taches techniques.
+- Voir [ALIGNEMENT_CDC.md](./ALIGNEMENT_CDC.md) pour l'etat actuel du code vs la cible CDC.
+
 ## Fonctionnalités Principales
 
 VibeRemote repose sur un pipeline d'agents IA spécialisés, avec une gestion dynamique des CLI et un système de mémoire hybride.
@@ -31,8 +38,16 @@ L'orchestrateur est contrôlé intégralement via un bot Telegram avec claviers 
 - `/code` : Sélection du projet local à éditer.
 - `/cli` : Configuration du CLI par défaut et gestion des CLI autorisés/désactivés (via tuiles ON/OFF).
 - `/model` : Choix du modèle d'IA préféré.
+- `/ide` : Configuration de l'IDE par défaut et des IDE autorisés/désactivés.
+- `/lang` : Bascule de langue (français / anglais).
 - `/history` : Consultation de l'historique des sessions pour le projet actuel.
 - `/save` : Sauvegarde manuelle avec notes personnalisées.
+
+### 5. Télécommande IDE en miroir PC (`utils/ide-manager.js`)
+- Détection automatique des IDE installés (ex: Cursor, VSCode, Windsurf, JetBrains, Visual Studio).
+- Sélection d'un IDE par défaut depuis Telegram ou le GUI local.
+- Fallback automatique vers les autres IDE disponibles en cas d'échec de lancement.
+- Tuile `🚀 Ouvrir IDE` pour ouvrir directement le projet actif sur le PC.
 
 ## Installation et Lancement
 

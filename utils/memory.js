@@ -19,10 +19,12 @@ import path from 'path';
 export async function initMemory(basePath) {
     const memoryPath = path.join(basePath, 'MEMORY');
     const sessionsPath = path.join(memoryPath, 'sessions');
+    const weeklyPath = path.join(memoryPath, 'weekly');
     
     try {
         await fs.mkdir(memoryPath, { recursive: true });
         await fs.mkdir(sessionsPath, { recursive: true });
+        await fs.mkdir(weeklyPath, { recursive: true });
         
         // Initialiser QMD si disponible
         await initQMD(basePath);
@@ -106,12 +108,9 @@ export async function queryMemory(basePath, prompt) {
 }
 
 // Recherche textuelle simple (fallback si QMD échoue)
-async function simpleTextSearch(memoryPath, query) {
+export async function simpleTextSearch(memoryPath, query) {
     try {
-        const files = await fs.readdir(memoryPath, { withFileTypes: true });
-        const mdFiles = files
-            .filter(f => f.isFile() && f.name.endsWith('.md') && !f.name.startsWith('.'))
-            .map(f => f.name);
+        const mdFiles = await collectMarkdownFiles(memoryPath, memoryPath);
         
         if (mdFiles.length === 0) return '';
         
@@ -119,9 +118,9 @@ async function simpleTextSearch(memoryPath, query) {
         const results = [];
         
         // Lire les 15 fichiers les plus récents
-        for (const filename of mdFiles.slice(-15)) {
+        for (const fileInfo of mdFiles.slice(-15)) {
             try {
-                const filePath = path.join(memoryPath, filename);
+                const filePath = fileInfo.absolutePath;
                 const content = await fs.readFile(filePath, 'utf8');
                 const contentLower = content.toLowerCase();
                 
@@ -135,7 +134,7 @@ async function simpleTextSearch(memoryPath, query) {
                 }
                 
                 // Boost temporel (fichiers récents)
-                const dateMatch = filename.match(/(\d{4}-\d{2}-\d{2})/);
+                const dateMatch = fileInfo.relativePath.match(/(\d{4}-\d{2}-\d{2})/);
                 if (dateMatch) {
                     const fileDate = new Date(dateMatch[1]);
                     const daysOld = (Date.now() - fileDate.getTime()) / (1000 * 60 * 60 * 24);
@@ -146,7 +145,7 @@ async function simpleTextSearch(memoryPath, query) {
                 if (score > 0.1) {
                     // Extraire le snippet pertinent
                     const snippet = extractSnippet(content, queryTerms);
-                    results.push({ filename, score, content: snippet });
+                    results.push({ filename: fileInfo.relativePath, score, content: snippet });
                 }
             } catch (err) {
                 // Ignorer les fichiers illisibles
@@ -159,6 +158,107 @@ async function simpleTextSearch(memoryPath, query) {
     } catch (err) {
         return '';
     }
+}
+
+async function collectMarkdownFiles(rootPath, currentPath) {
+    const output = [];
+    const entries = await fs.readdir(currentPath, { withFileTypes: true });
+
+    for (const entry of entries) {
+        const absolutePath = path.join(currentPath, entry.name);
+        if (entry.isDirectory()) {
+            // Ignore technical folders that do not bring user context.
+            if (entry.name === 'xdg-cache' || entry.name === 'xdg-config') continue;
+            const nested = await collectMarkdownFiles(rootPath, absolutePath);
+            output.push(...nested);
+            continue;
+        }
+
+        if (entry.isFile() && entry.name.endsWith('.md') && !entry.name.startsWith('.')) {
+            output.push({
+                absolutePath,
+                relativePath: path.relative(rootPath, absolutePath).replace(/\\/g, '/')
+            });
+        }
+    }
+
+    return output;
+}
+
+function getIsoWeekInfo(date = new Date()) {
+    const utcDate = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+    const day = utcDate.getUTCDay() || 7;
+    utcDate.setUTCDate(utcDate.getUTCDate() + 4 - day);
+
+    const yearStart = new Date(Date.UTC(utcDate.getUTCFullYear(), 0, 1));
+    const weekNo = Math.ceil((((utcDate - yearStart) / 86400000) + 1) / 7);
+    const isoYear = utcDate.getUTCFullYear();
+
+    return { isoYear, weekNo };
+}
+
+export function getWeeklyLogPath(memoryPath, date = new Date()) {
+    const { isoYear, weekNo } = getIsoWeekInfo(date);
+    const week = String(weekNo).padStart(2, '0');
+    return path.join(memoryPath, 'weekly', `${isoYear}-W${week}.md`);
+}
+
+function sanitizeRepoName(repoName = 'unknown') {
+    return repoName.replace(/[^a-zA-Z0-9-_]/g, '_');
+}
+
+export function getProjectMemoryPath(basePath, repoName) {
+    const memoryPath = path.join(basePath, 'MEMORY');
+    return path.join(memoryPath, 'projects', sanitizeRepoName(repoName), 'MEMORY.md');
+}
+
+async function appendToWeeklyLog(basePath, sessionName, event) {
+    const memoryPath = path.join(basePath, 'MEMORY');
+    const timestamp = new Date().toISOString();
+    const weeklyLogPath = getWeeklyLogPath(memoryPath, new Date());
+    const logEntry = `## [${timestamp}] ${sessionName}\n${event}\n\n`;
+
+    await fs.mkdir(path.dirname(weeklyLogPath), { recursive: true });
+    await fs.appendFile(weeklyLogPath, logEntry, 'utf8');
+    await indexWithQMD(basePath, weeklyLogPath);
+    return weeklyLogPath;
+}
+
+export async function updateProjectMemory(basePath, sessionData) {
+    const projectMemoryPath = getProjectMemoryPath(basePath, sessionData.repo);
+    const filesTouched = sessionData.filesCreated?.length
+        ? sessionData.filesCreated.map(file => `- ${file}`).join('\n')
+        : '- Aucun';
+
+    const body = [
+        `# Project Memory: ${sessionData.repo}`,
+        '',
+        `Updated: ${new Date().toISOString()}`,
+        `CLI: ${sessionData.cli || 'auto'}`,
+        `Model: ${sessionData.model || 'auto'}`,
+        `Status: ${sessionData.success ? 'success' : 'failed'}`,
+        `Attempts: ${sessionData.attempts ?? 1}`,
+        '',
+        '## Latest Request',
+        sessionData.prompt || 'N/A',
+        '',
+        '## Latest Summary',
+        sessionData.summary || 'N/A',
+        '',
+        '## Latest Files',
+        filesTouched,
+        '',
+        '## Latest Tests',
+        sessionData.testResult || 'Non exÃ©cutÃ©s',
+        '',
+        '## Notes',
+        sessionData.notes || 'Aucune'
+    ].join('\n');
+
+    await fs.mkdir(path.dirname(projectMemoryPath), { recursive: true });
+    await fs.writeFile(projectMemoryPath, `${body}\n`, 'utf8');
+    await indexWithQMD(basePath, projectMemoryPath);
+    return projectMemoryPath;
 }
 
 // Extraire un snippet pertinent autour des termes recherchés
@@ -203,12 +303,30 @@ export async function appendToDailyLog(basePath, sessionName, event) {
         await fs.mkdir(memoryPath, { recursive: true });
         await fs.appendFile(dailyLogPath, logEntry, 'utf8');
         console.log(`[Memory] Daily log: ${dailyLogPath}`);
+        const weeklyPath = await appendToWeeklyLog(basePath, sessionName, event);
+        console.log(`[Memory] Weekly log: ${weeklyPath}`);
         
         // Indexer avec QMD si disponible
         await indexWithQMD(basePath, dailyLogPath);
     } catch (err) {
         console.error('[Memory] Erreur d\'écriture du daily log:', err);
     }
+}
+
+export async function appendFallbackTrace(basePath, sessionName, trace) {
+    const timestamp = new Date().toISOString();
+    const event = [
+        `Fallback CLI [${timestamp}]`,
+        `- cli: ${trace.cli}`,
+        `- status: ${trace.status}`,
+        `- reason: ${trace.reason}`,
+        `- durationMs: ${trace.durationMs}`,
+        `- exitCode: ${trace.exitCode ?? 'n/a'}`,
+        `- timedOut: ${trace.timedOut ? 'yes' : 'no'}`,
+        `- message: ${trace.message || 'n/a'}`
+    ].join('\n');
+
+    await appendToDailyLog(basePath, sessionName, event);
 }
 
 // Indexer un fichier avec QMD
@@ -245,7 +363,7 @@ export async function saveSessionSummary(basePath, sessionData) {
     const memoryPath = path.join(basePath, 'MEMORY');
     const sessionsPath = path.join(memoryPath, 'sessions');
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
-    const filename = `${timestamp}-${sessionData.repo.replace(/[^a-zA-Z0-9-_]/g, '_')}.md`;
+    const filename = `${timestamp}-${sanitizeRepoName(sessionData.repo)}.md`;
     const filePath = path.join(sessionsPath, filename);
     
     // Frontmatter structuré
@@ -287,6 +405,8 @@ export async function saveSessionSummary(basePath, sessionData) {
         await appendToDailyLog(basePath, sessionData.repo, 
             `Session ${sessionData.success ? '✅' : '❌'} - ${sessionData.prompt.slice(0, 100)}`);
         
+        await updateProjectMemory(basePath, sessionData);
+
         // Indexer avec QMD
         await indexWithQMD(basePath, filePath);
         

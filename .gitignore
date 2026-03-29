@@ -11,6 +11,9 @@ libs/qmd/
 # AI tool generated
 memory/
 tasks/
+.viberemote/
+tmp_verify_steps/
+.tmp-tests-*/
 
 # Database/Cache
 *.sqlite*
@@ -25,5 +28,4 @@ memory/xdg-cache/
 # Temp files
 tmp_*.js
 test*.js
-
 

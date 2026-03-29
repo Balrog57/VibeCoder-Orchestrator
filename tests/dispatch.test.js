@@ -1,0 +1,61 @@
+import { describe, expect, it } from 'vitest';
+import { resolveRemoteDispatch } from '../utils/dispatch.js';
+
+describe('resolveRemoteDispatch', () => {
+    const baseOptions = {
+        repos: ['VibeRemote', 'stlflix'],
+        availableClis: ['claude', 'codex', 'gemini'],
+        availableIdes: ['cursor', 'vscode'],
+        availableModels: {
+            claude: ['sonnet'],
+            codex: ['o4-mini']
+        }
+    };
+
+    it('detects a project selection intent', () => {
+        expect(resolveRemoteDispatch('projet VibeRemote', baseOptions)).toEqual({
+            type: 'select_repo',
+            value: 'VibeRemote'
+        });
+    });
+
+    it('detects a repo creation intent', () => {
+        expect(resolveRemoteDispatch('create repo RemoteHub', baseOptions)).toEqual({
+            type: 'create_repo',
+            value: 'RemoteHub'
+        });
+    });
+
+    it('detects language switching', () => {
+        expect(resolveRemoteDispatch('passe en anglais', baseOptions)).toEqual({
+            type: 'set_lang',
+            value: 'en'
+        });
+    });
+
+    it('detects IDE launch', () => {
+        expect(resolveRemoteDispatch('ouvre cursor', baseOptions)).toEqual({
+            type: 'open_ide',
+            value: 'cursor'
+        });
+    });
+
+    it('detects workspace mode switching', () => {
+        expect(resolveRemoteDispatch('utilise worktree', baseOptions)).toEqual({
+            type: 'set_workspace_mode',
+            value: 'worktree'
+        });
+    });
+
+    it('detects task profile switching without swallowing coding prompts', () => {
+        expect(resolveRemoteDispatch('mode review', baseOptions)).toEqual({
+            type: 'set_task_profile',
+            value: 'review'
+        });
+        expect(resolveRemoteDispatch('review ce composant React', baseOptions)).toBeNull();
+    });
+
+    it('does not swallow a real coding request', () => {
+        expect(resolveRemoteDispatch('corrige les tests du projet', baseOptions)).toBeNull();
+    });
+});

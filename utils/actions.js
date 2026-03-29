@@ -2,6 +2,77 @@ import fs from 'fs/promises';
 import path from 'path';
 import { execa } from 'execa';
 
+export function resolveWorkspacePath(basePath, relativePath = '') {
+    const normalizedBasePath = path.resolve(basePath);
+    const absolutePath = path.resolve(normalizedBasePath, relativePath || '.');
+    const relativeFromBase = path.relative(normalizedBasePath, absolutePath);
+
+    if (relativeFromBase.startsWith('..') || path.isAbsolute(relativeFromBase)) {
+        throw new Error(`Chemin hors workspace interdit: ${relativePath}`);
+    }
+
+    return {
+        basePath: normalizedBasePath,
+        absolutePath,
+        relativePath: relativeFromBase === '' ? '' : relativeFromBase.replace(/\\/g, '/')
+    };
+}
+
+export function resolvePathInsideRepo(repoPath, relativeFilePath) {
+    if (!relativeFilePath || typeof relativeFilePath !== 'string') {
+        throw new Error('Chemin de fichier invalide.');
+    }
+
+    if (path.isAbsolute(relativeFilePath)) {
+        throw new Error(`Chemin absolu interdit: ${relativeFilePath}`);
+    }
+
+    const normalizedRepoPath = path.resolve(repoPath);
+    const absolutePath = path.resolve(normalizedRepoPath, relativeFilePath);
+    const relativeFromRepo = path.relative(normalizedRepoPath, absolutePath);
+
+    if (relativeFromRepo.startsWith('..') || path.isAbsolute(relativeFromRepo)) {
+        throw new Error(`Chemin hors dépôt interdit: ${relativeFilePath}`);
+    }
+
+    return absolutePath;
+}
+
+export function parseCommandLine(commandToRun) {
+    const trimmed = commandToRun.trim();
+    if (!trimmed) {
+        throw new Error('Commande vide.');
+    }
+
+    // Refuse explicit shell chaining/redirection to avoid injection primitives.
+    if (/[|&;<>`]/.test(trimmed)) {
+        throw new Error('La commande contient des opérateurs shell interdits.');
+    }
+
+    const tokens = [];
+    const tokenRegex = /"([^"\\]*(?:\\.[^"\\]*)*)"|'([^'\\]*(?:\\.[^'\\]*)*)'|[^\s]+/g;
+    let match;
+
+    while ((match = tokenRegex.exec(trimmed)) !== null) {
+        const quotedDouble = match[1];
+        const quotedSingle = match[2];
+        if (quotedDouble !== undefined) {
+            tokens.push(quotedDouble.replace(/\\(["\\])/g, '$1'));
+        } else if (quotedSingle !== undefined) {
+            tokens.push(quotedSingle.replace(/\\(['\\])/g, '$1'));
+        } else {
+            tokens.push(match[0]);
+        }
+    }
+
+    if (tokens.length === 0) {
+        throw new Error('Impossible de parser la commande.');
+    }
+
+    const [cmd, ...args] = tokens;
+    return { cmd, args };
+}
+
 /**
  * Parcourt le texte généré par l'IA et extrait les blocs de code pour les écrire sur le disque.
  * Format attendu :
@@ -103,7 +174,7 @@ export async function applyCodeToFiles(llmOutput, repoPath) {
             fileName = fileName || 'generated-code.js';
 
             // Écrire le premier bloc de code trouvé
-            const absolutePath = path.join(repoPath, fileName);
+            const absolutePath = resolvePathInsideRepo(repoPath, fileName);
             const dir = path.dirname(absolutePath);
 
             try {
@@ -118,7 +189,7 @@ export async function applyCodeToFiles(llmOutput, repoPath) {
 
         // Sauvegarder l'output problématique pour analyse si nécessaire
         try {
-            const debugFile = path.join(repoPath, 'debug-last-failed-output.txt');
+            const debugFile = resolvePathInsideRepo(repoPath, 'debug-last-failed-output.txt');
             await fs.writeFile(debugFile, llmOutput, 'utf-8');
             console.log(`[Actions] Output brut sauvegardé dans ${debugFile}`);
         } catch (e) { }
@@ -132,7 +203,7 @@ export async function applyCodeToFiles(llmOutput, repoPath) {
         console.log(`[Actions] Fichier trouvé: ${relativeFilePath} (${language || 'unknown'})`);
         console.log(`[Actions] Code length: ${codeContent.length}`);
 
-        const absolutePath = path.join(repoPath, relativeFilePath);
+        const absolutePath = resolvePathInsideRepo(repoPath, relativeFilePath);
         const dir = path.dirname(absolutePath);
 
         try {
@@ -156,7 +227,7 @@ export async function applyCodeToFiles(llmOutput, repoPath) {
         const newCode = match[3];
 
         console.log(`[Actions] Patch trouvé pour: ${relativeFilePath}`);
-        const absolutePath = path.join(repoPath, relativeFilePath);
+        const absolutePath = resolvePathInsideRepo(repoPath, relativeFilePath);
 
         try {
             const currentContent = await fs.readFile(absolutePath, 'utf-8');
@@ -195,15 +266,13 @@ export async function executeAndTest(llmOutput, repoPath, onProgress = null) {
     console.log(`[Actions] Exécution de la commande de test : ${commandToRun}`);
 
     try {
-        // Exécuter la commande dans le répertoire repoPath, avec un timeout de 15 secondes
-        // On split la commande et ses arguments de manière sécurisée (simplifiée ici)
-        const args = commandToRun.split(' ');
-        const cmd = args.shift();
+        // Exécuter la commande sans shell pour réduire le risque d'injection.
+        const { cmd, args } = parseCommandLine(commandToRun);
 
         const child = execa(cmd, args, {
             cwd: repoPath,
             timeout: 15000,
-            shell: true // Toléré ici pour certains scripts, mais attention aux injections si variables non contrôlées
+            shell: false
         });
 
         if (onProgress) {
@@ -267,17 +336,61 @@ export async function listRepos(basePath) {
     }
 }
 
+export async function listDirectoryNodes(basePath, relativePath = '') {
+    try {
+        const current = resolveWorkspacePath(basePath, relativePath);
+        const entries = await fs.readdir(current.absolutePath, { withFileTypes: true });
+        const directories = entries
+            .filter(dirent => dirent.isDirectory() && !dirent.name.startsWith('.'))
+            .map(dirent => {
+                const entryRelativePath = current.relativePath
+                    ? `${current.relativePath}/${dirent.name}`
+                    : dirent.name;
+
+                return {
+                    name: dirent.name,
+                    relativePath: entryRelativePath
+                };
+            })
+            .sort((left, right) => left.name.localeCompare(right.name, 'fr', { sensitivity: 'base' }));
+
+        let parentPath = null;
+        if (current.relativePath) {
+            const parent = path.posix.dirname(current.relativePath);
+            parentPath = parent === '.' ? '' : parent;
+        }
+
+        return {
+            currentPath: current.relativePath,
+            absolutePath: current.absolutePath,
+            parentPath,
+            entries: directories
+        };
+    } catch (error) {
+        console.error('Erreur lors du listage des dossiers:', error);
+        return {
+            currentPath: '',
+            absolutePath: path.resolve(basePath),
+            parentPath: null,
+            entries: []
+        };
+    }
+}
+
 /**
  * Crée un nouveau répertoire de projet avec un .gitignore de base
  */
-export async function createNewRepo(basePath, name) {
-    const targetPath = path.join(basePath, name);
+export async function createNewRepo(basePath, name, relativeParent = '') {
     try {
+        const parent = resolveWorkspacePath(basePath, relativeParent);
+        const targetPath = path.resolve(parent.absolutePath, name);
+        const relativePath = path.relative(parent.basePath, targetPath).replace(/\\/g, '/');
+        resolveWorkspacePath(basePath, relativePath);
         await fs.mkdir(targetPath, { recursive: true });
         // Initialiser un gitignore par défaut
         const gitignoreContent = "node_modules/\n.env\n.DS_Store\n";
         await fs.writeFile(path.join(targetPath, ".gitignore"), gitignoreContent);
-        return { success: true, path: targetPath };
+        return { success: true, path: targetPath, relativePath };
     } catch (error) {
         return { success: false, error: error.message };
     }

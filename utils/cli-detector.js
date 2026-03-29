@@ -6,7 +6,7 @@ import { execa } from 'execa';
  * Source unique de vérité pour les arguments, les tiers et les modèles.
  */
 
-const CLI_CONFIG = {
+export const CLI_CONFIG = {
     claude: {
         checkCmd: ['--version'],
         modelsCmd: null,
