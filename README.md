@@ -1,4 +1,4 @@
-# VibeRemote
+# [WIP]VibeRemote
 
 **Version:** 2.5
 **Description:** Assistant de code multi-agents autonome fonctionnant via Telegram, permettant de gérer et de développer des projets locaux de manière assistée.
